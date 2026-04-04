@@ -85,7 +85,68 @@ signal to distinguish a new phone from an attacker at any threshold.
 
 ## 2. Experiment Design
 
-### 2.1 Data generation
+### 2.1 Scoring approach
+
+All embedding-based signals share the same three-step pipeline.
+
+**Step 1 — Token embedding.** The model (Word2Vec or FastText) produces a vector for each
+token in the vocabulary. For feature-based signals, a device's embedding is the mean of its
+six feature token vectors:
+
+```
+device_vec = mean([embed("os_ios"), embed("browser_safari"), embed("tz_utc-5"),
+                   embed("lang_en"), embed("net_wifi"), embed("screen_1920x1080")])
+```
+
+**Step 2 — Account centroid.** For each account, the centroid is the frequency-weighted mean
+of its known device embeddings computed over the training history:
+
+```
+account_centroid = mean([device_vec_1, device_vec_2, ...])  # weighted by login frequency
+```
+
+**Step 3 — Anomaly score.** At inference, the incoming device's embedding is computed the
+same way and scored against the account centroid:
+
+```
+score = cosine_distance(candidate_vec, account_centroid)
+        = 1 - cosine_similarity(candidate_vec, account_centroid)
+```
+
+Higher score means the device's behavioral fingerprint is further from the account's
+established profile. ROC-AUC over these scalar scores — evaluated across all attack and
+legitimate events — is the primary evaluation metric. No threshold is fitted during
+evaluation; ROC-AUC measures discrimination across all possible operating points.
+
+The binary signals (`global_oov`, `account_oov`, `feature_novelty`) skip steps 1–2 and
+produce a hard 0/1 score directly from vocabulary membership or tuple lookup.
+
+**Design choice: mean-pooling vs. concatenated token string.** An alternative to
+mean-pooling six token embeddings is to concatenate the feature values into a single
+string token (`ios_safari_utc-5_en_wifi_1920x1080`) and embed that string directly with
+FastText. This does not recreate an OOV problem — FastText embeds any unseen combination
+via n-gram averaging over the structured prefixes, and two devices that differ only in
+screen resolution would share most of their n-grams and land close together, which is
+semantically correct.
+
+Three considerations favor mean-pooling for this experiment. First, the concatenated
+string implicitly weights features by position: n-gram overlap is front-loaded, so a
+timezone mismatch at position 3 reduces similarity for all subsequent features even where
+the devices agree. Mean-pooling treats all six dimensions equally by construction. Second,
+n-grams that span feature boundaries (`_sa` crossing os/browser, `i_u` crossing
+browser/tz) contribute signal that is not tied to any semantic dimension — a mild version
+of the same mechanism that caused FastText on random device IDs to collapse cluster
+structure. Third, mean-pooling allows skip-gram to learn cross-feature co-occurrence
+explicitly: the model trains on that `os_ios` and `browser_safari` appear together in
+many accounts, enriching each token's embedding with correlational structure that the
+concatenated approach only captures implicitly through n-gram overlap.
+
+None of these is a decisive argument. Concatenated FastText is a legitimate alternative
+that positions similar devices similarly by construction and may reduce information loss
+from averaging. It was not tested here; the feature ordering sensitivity and cross-boundary
+n-gram noise are the primary open questions.
+
+### 2.2 Data generation
 
 **Accounts and devices:** 400 synthetic accounts were generated, each with a primary device
 profile defined across six dimensions (OS, browser, timezone, language, network type, screen
@@ -112,7 +173,7 @@ resolution: ~6). This bounded vocabulary is the key property that distinguishes 
 embeddings from ID-based embeddings: a new device is not out-of-vocabulary because it has
 features, not an opaque identifier.
 
-### 2.2 Evaluation design and the enrollment problem
+### 2.3 Evaluation design and the enrollment problem
 
 The evaluation negative class contains two event types at equal weight:
 
@@ -134,7 +195,7 @@ through (FPR=0.5, TPR=1.0) at the detection threshold, yielding area 0.75.
 Bootstrap confidence intervals (N=1,000, 95%, percentile method) are reported for all AUC
 estimates.
 
-### 2.3 Attack types
+### 2.4 Attack types
 
 Three attack types cover distinct threat models:
 
@@ -155,7 +216,7 @@ browser, and language as the account's primary profile; different timezone only.
 a sophisticated attacker who has researched the victim's device characteristics. Only signals
 that measure fine-grained feature proximity can detect the timezone mismatch.
 
-### 2.4 Signals evaluated
+### 2.5 Signals evaluated
 
 Six signals were evaluated across all three attack types and both corpus modes.
 

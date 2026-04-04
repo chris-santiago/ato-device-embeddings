@@ -11,14 +11,28 @@ literally. Do not skip steps. Do not reorder them. Do not conflate them.
 
 ## Before you begin
 
-Ask the user for exactly one thing:
+Ask the user for two things before writing any code:
 
+**1. The hypothesis:**
 > "State your hypothesis as a specific, falsifiable claim. Name the mechanism, the signal,
 > and the expected observable. Example: 'X trained on Y will produce Z, which creates
 > detectable signal W.'"
 
 Do not proceed until you have a hypothesis in this form. If the user's hypothesis is vague,
-help them sharpen it before writing any code.
+help them sharpen it first.
+
+**2. The primary evaluation metric(s):**
+Based on the hypothesis, suggest two or three candidate metrics with a brief rationale for
+each. Then ask the user to confirm or override. Examples of how to reason about this:
+
+- Binary classification tasks (positive vs. negative class) → AUC-ROC, average precision
+- Precision-critical deployments (low false-positive budget) → precision@K, FPR at fixed TPR
+- Ranking or scoring tasks → NDCG, Spearman rank correlation
+- Clustering or representation quality → silhouette score, Davies–Bouldin index
+- Regression targets → RMSE, MAE, R²
+
+Record the agreed metric(s) explicitly. Every reference to "the primary metric" in the
+steps below means the metric(s) agreed here — not AUC by default.
 
 ---
 
@@ -28,10 +42,10 @@ help them sharpen it before writing any code.
 It should run in one command and produce a number.
 
 **What to build:**
-- Synthetic data generation with controlled ground truth (you control who is "legitimate"
-  and who is "attacker")
+- Synthetic data generation with controlled ground truth (you define the classes,
+  targets, or groups — whatever the hypothesis requires)
 - The proposed model or signal, implemented simply
-- A primary evaluation metric (AUC, accuracy, F1 — whatever fits the hypothesis)
+- The agreed primary metric(s), computed on the synthetic evaluation set
 - At least one visualization that shows the mechanism, not just the score
 
 **Rules:**
@@ -43,7 +57,7 @@ It should run in one command and produce a number.
   leaving out. These become the scope boundary for every later step.
 
 **Artifact to produce:** A single runnable Python script. Name it after the hypothesis
-domain (e.g., `ato_fasttext_poc.py`).
+domain (e.g., `churn_prediction_poc.py`, `anomaly_detection_poc.py`).
 
 ---
 
@@ -63,8 +77,9 @@ the *intent* of every design choice — not just what the code does, but why.
 
 **The most dangerous mistake at this step:** Flagging intentional behavior as a bug.
 ML evaluation design depends entirely on what the system is supposed to do in production.
-A "data leakage" finding that turns out to be a membership/proximity test by design is
-not a data leakage finding — it is a misunderstanding of the hypothesis.
+A "data leakage" finding that turns out to be intentional by the evaluation design
+(e.g., a deliberate membership or proximity test) is not a data leakage finding —
+it is a misunderstanding of the hypothesis.
 
 **Artifact to produce:** `README.md` with:
 - One-paragraph hypothesis statement
@@ -140,7 +155,7 @@ argument turns until it reaches one of three outcomes:
   has been found, or a logical consequence has been derived that neither side originally
   stated.
 - Empirical tests must be stated as exact conditions: not "investigate the baseline" but
-  "run a binary OOV lookup and compare AUC to the primary model."
+  "run [specific baseline condition] and compare [agreed primary metric] to the primary model."
 
 **At the end of the debate, produce a list of agreed empirical tests.** This list is the
 specification for Step 6. Nothing goes into the experiment that is not on this list.
@@ -166,17 +181,18 @@ condition with a pre-specified verdict.
 - What result would be ambiguous
 
 **Implementation requirements:**
-- Bootstrap confidence intervals (N=1,000, percentile method) on all AUC numbers
-- Stratified analysis where the debate identified relevant subpopulations (history
-  length, corpus mode, etc.)
+- Bootstrap confidence intervals (N=1,000, percentile method) on all primary metric values
+- Stratified analysis where the debate identified relevant subpopulations (e.g.,
+  subgroup size, data regime, input distribution — whatever the hypothesis implies)
 - All models and baselines evaluated on identical data splits
 - Explicitly verify that baseline implementations test what you think they test
 
 **The baseline verification rule:** A broken baseline that appears weak makes the primary
 model look stronger than it is. Before reporting baseline results, inspect the scoring
 function line by line. Confirm that the baseline is correctly testing the intended
-condition. The most common failure mode: using a library method that returns True for
-any input when you expect it to return True only for seen inputs.
+condition. Common failure modes: a silent API misuse that makes every input score
+identically, a default argument that bypasses the intended behavior, or an evaluation
+setup that trivially satisfies the baseline condition regardless of input.
 
 **Artifact to produce:** A runnable Python script (`[domain]_experiment2.py`) that
 implements all agreed tests and reports results against pre-specified verdicts.
@@ -199,7 +215,7 @@ to anticipate it. These results are often the most informative.
 
 **Generate figures at this step.** Each figure should illustrate exactly one finding.
 Prefer distributions and uncertainty over point estimates. A score distribution showing
-three event types tells a more complete story than a single AUC number.
+three event types tells a more complete story than a single summary metric.
 
 **Artifact to produce:** `CONCLUSIONS.md` with a debate scorecard (table: point, topic,
 verdict, evidence) and the figures referenced inline.
@@ -215,9 +231,9 @@ Each of these restarts the cycle.
 
 **Common triggers for another iteration:**
 
-- **Evaluation design flaw discovered:** A signal achieved suspiciously high AUC because
-  the negative class was missing a realistic event type (e.g., legitimate new device
-  enrollment). Patch the evaluation design and re-run before drawing conclusions.
+- **Evaluation design flaw discovered:** A model achieved suspiciously strong performance
+  because a key population was absent or underrepresented in the evaluation set. Patch the
+  evaluation design and re-run before drawing conclusions.
 
 - **New hypothesis generated by results:** A finding suggests a different model, signal,
   or data representation that was not in the original debate. If it is material to the
@@ -225,11 +241,12 @@ Each of these restarts the cycle.
 
 - **Baseline was broken:** A baseline that appeared weak made the primary model look
   stronger than it is. Fix the baseline and re-run. The numerical result may change
-  substantially (see: gensim FastText `__contains__` bug, AUC 0.500 → 0.989 after fix).
+  substantially — a silent API misuse that scores every input identically can make a
+  near-chance baseline look near-perfect once fixed.
 
-- **New attack type or confound identified:** The corrected data design reveals a threat
-  model that was absent from the experiment (e.g., cross-account device reuse, profile
-  spoofing). If it changes which signals are viable, add it and re-run.
+- **New confound or population identified:** The corrected data design reveals a condition
+  absent from the experiment (e.g., a subgroup, a distributional shift, or an interaction
+  effect not originally anticipated). If it changes the material findings, add it and re-run.
 
 **How to manage the cycle:**
 
@@ -241,8 +258,8 @@ sections per experiment. This preserves the debate scorecard as a running record
 **The exit condition:** The cycle is complete when:
 1. All pre-specified verdicts from the current debate are resolved
 2. No evaluation design flaw has been identified that would change a material finding
-3. The recommended signal hierarchy is stable — a new iteration would not change which
-   signal is recommended for which deployment path
+3. The recommendation is stable — a new iteration would not change the primary finding
+   or what approach is recommended
 
 Do not proceed to Step 8 until these three conditions hold. A report written before the
 cycle is complete will require post-hoc addenda — which means the recommendation cannot
@@ -275,10 +292,10 @@ recommendations.
 
 **When a number comes from a dropped experiment:** Any quantitative claim from a dropped
 experiment that appears in the report — as design justification or in the discussion —
-must be stated with enough context to stand alone. Do not write "FastText was eliminated
-because of poor cluster structure" without stating the silhouette score and what it
-measures. A reader who encounters the number should understand what was measured and what
-it means, even without a full experiment section.
+must be stated with enough context to stand alone. Do not write "[approach] was eliminated
+because of poor performance" without stating the metric value, what it measures, and what
+threshold or comparison justified the elimination. A reader who encounters the number
+should understand what was measured and why it mattered, even without a full experiment section.
 
 **The self-contained test:** Someone who reads only the report should understand what was
 claimed, what was tested, what the evidence showed, and what should be built next —
@@ -304,11 +321,11 @@ production constraints that the PoC deliberately excluded.
 **Always check these four areas:**
 
 1. **Retraining dynamics:** How often must the model be retrained? What happens to
-   existing state (embeddings, centroids, cached scores) when it is? Can existing scores
-   survive a retraining event, or must everything be recomputed?
+   existing state (cached scores, indices, derived representations) when it is? Can
+   existing outputs survive a retraining event, or must everything be recomputed?
 
-2. **Update latency:** How quickly can the signal respond to new information (new
-   legitimate users, confirmed fraud, revoked devices)?
+2. **Update latency:** How quickly can the model or signal respond to new information
+   (new training data, label corrections, shifted distributions)?
 
 3. **Operational complexity:** What infrastructure is required to deploy, monitor, and
    maintain the recommended approach? Can you describe it concretely — what jobs run,
@@ -317,13 +334,12 @@ production constraints that the PoC deliberately excluded.
 4. **Failure modes:** What happens when the model is wrong, stale, or unavailable?
 
 **The completeness test:** If a recommendation requires infrastructure that cannot be
-described concretely, the recommendation is incomplete. "Use a centroid-based approach"
-is not a recommendation. "Store full device histories per account, run a nightly recompute
-job after each model retraining, gate deployment on recompute completion, and use the
-score as a feature in an upstream model updated daily" is a recommendation.
+described concretely, the recommendation is incomplete. "Use this model in production"
+is not a recommendation. A recommendation names what runs, on what cadence, gated on
+what conditions, with what fallback when the model is wrong or unavailable.
 
 **Production constraints frequently invert the ranking of candidates.** A model with
-superior experimental AUC may be architecturally expensive to operate. A simpler signal
+superior experimental performance may be architecturally expensive to operate. A simpler signal
 that appeared weaker in the experiment may be more robust in deployment. If the production
 re-evaluation changes the recommendation, write an addendum explaining the reversal.
 

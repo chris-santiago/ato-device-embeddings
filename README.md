@@ -46,6 +46,10 @@ uv run experiments/plot_conclusions.py
 | `experiments/ato_experiment2.py` | Experiment 2: FastText vs Word2Vec vs OOV binary baseline; two corpus modes; bootstrap CIs; silhouette; stratified AUC; centroid norm |
 | `experiments/ato_experiment3.py` | Experiment 3: shared fraud fleet corpus; feature token embeddings; 6 signals × 3 attack types × 2 corpus modes; enrollment in negative class |
 | `experiments/plot_conclusions.py` | Generates the 6 figures referenced in Experiment 2 conclusions |
+| `experiments/ato_concat_poc.py` | H2 original PoC: mean-pool vs. concat FastText, AUC + silhouette |
+| `experiments/ato_concat_experiment.py` | H2 five-test experiment: window sweep, prefix format, tz permutation, OOV injection |
+| `experiments/h2_rerun_poc.py` | H2 rerun PoC (agent-run): clean independent implementation of mean-pool vs. concat |
+| `experiments/h2_rerun_experiment1.py` | H2 rerun experiment: bootstrap CIs, window sweep, prefix format, trivial baseline, tz permutation |
 
 ### Research documents
 
@@ -57,8 +61,78 @@ uv run experiments/plot_conclusions.py
 | `docs/CRITIQUE.md` | Ten-point adversarial critique of the original PoC from first principles |
 | `docs/DEFENSE.md` | Point-by-point rebuttal of the critique |
 | `docs/DEBATE.md` | Multi-turn argument on each contested point, resolving to concession or agreed empirical test |
+| `docs/H2_REPORT.md` | H2 original investigation: full five-test experiment report with debate scorecard |
+| `docs/H2_RERUN_REPORT.md` | H2 rerun report (agent-run): self-contained account of all findings, mechanism analysis, and recommendation |
+| `docs/H2_RERUN_CONCLUSIONS.md` | H2 rerun: per-test verdicts, scorecard, and revised mechanism understanding |
+| `docs/H2_RERUN_DEBATE.md` | H2 rerun: multi-round debate between critic and defense agents |
+| `docs/H2_RERUN_CRITIQUE.md` | H2 rerun: adversarial critique of the H2 PoC |
+| `docs/H2_RERUN_DEFENSE.md` | H2 rerun: point-by-point defense of the H2 hypothesis |
 | `PROCESS.md` | Prescriptive 9-step methodology for ML hypothesis investigation (general-purpose) |
 | `agent.md` | Agent-executable version of PROCESS.md for running this methodology on any DS/ML hypothesis |
+
+---
+
+## H2 Investigation — Mean-Pool vs. Concatenated-String FastText
+
+A follow-on investigation testing whether mean-pooling six feature-token embeddings
+outperforms concatenating feature values into a single FastText token.
+
+**Hypothesis H2:** Mean-pooling six feature token embeddings will outperform concatenated-string
+FastText because (a) n-gram bleed across feature boundaries contributes spurious signal
+uncorrelated with any semantic dimension, and (b) front-loaded positional weighting means a
+mismatch at feature N penalizes n-gram overlap for all features that follow. Both effects are
+measurable as lower silhouette score and lower ROC-AUC.
+
+### H2 original investigation
+
+```bash
+# H2 original proof-of-concept
+uv run experiments/ato_concat_poc.py
+
+# H2 five-test experiment (window sweep, prefix format, tz permutation, OOV injection)
+uv run experiments/ato_concat_experiment.py
+```
+
+The original investigation ran a five-test experiment (T1–T4) and found a **split verdict**: at
+matched window sizes, concat closes most of the gap on novel and fleet attacks, but a residual
+spoof-detection gap persists (+0.043 AUC). The original PoC's apparent H2 support was driven
+by a window asymmetry (`window=1` for concat vs `window=6` for mean-pool). See `docs/H2_REPORT.md`
+for the full account.
+
+### H2 rerun — conducted with the `ml-hypothesis-investigator` agent
+
+The H2 hypothesis was re-run end-to-end using the structured
+[`ml-hypothesis-investigator`](agent.md) agent: independent PoC → adversarial critique →
+design defense → multi-round debate → five pre-registered experiments → production evaluation
+→ self-contained report.
+
+```bash
+# H2 rerun proof-of-concept (fresh, independent implementation)
+uv run experiments/h2_rerun_poc.py
+
+# H2 rerun experiment (bootstrap CIs, window sweep, prefix format, trivial baseline, tz permutation)
+uv run experiments/h2_rerun_experiment1.py
+```
+
+**Rerun verdict: H2 confirmed — 7/7 empirical tests support mean-pool.** Unlike the original
+investigation, pre-registered thresholds were applied: window equalization is credited as a
+"critique wins" only if it recovers ≥50% of the AUC delta. Concat w=6 recovered only 43.6%
+of the spoof delta — below that threshold. Key findings:
+
+| Metric | Mean-pool advantage | Bootstrap 95% CI |
+|--------|--------------------|--------------------|
+| Silhouette | +0.119 | [+0.073, +0.133] |
+| Spoof AUC | +0.054 | [+0.034, +0.077] |
+| Novel AUC | +0.012 | [+0.005, +0.022] |
+| Fleet AUC | +0.006 | [+0.000, +0.013] |
+
+**Mechanism correction:** The original "front-loaded positional weighting" framing was wrong.
+The tz-permutation test showed that moving tz *later* makes spoof AUC *worse* (tz at last
+position: AUC 0.655 vs. baseline 0.763). The correct mechanism is **cumulative cross-boundary
+n-gram contamination** — every feature after a mismatched feature has its n-gram distribution
+corrupted. Mean-pooling eliminates this entirely by embedding each feature independently.
+
+See `docs/H2_RERUN_REPORT.md` for the full self-contained account.
 
 ---
 
