@@ -334,14 +334,14 @@ alternative.
 
 | File | Step | Contents |
 |------|------|----------|
-| `experiments/ato_concat_poc.py` | 1 | PoC: two-way comparison at default windows |
+| `pre_ml_lab/experiments/ato_concat_poc.py` | 1 | PoC: two-way comparison at default windows |
 | `README.md` (H2 section) | 2 | Intent, quickstart, limitations |
-| `docs/H2_CRITIQUE.md` | 3 | Seven-point adversarial critique |
-| `docs/H2_DEFENSE.md` | 4 | Point-by-point rebuttal with concessions |
-| `docs/H2_DEBATE.md` | 5 | Multi-turn debate to five agreed empirical tests |
-| `experiments/ato_concat_experiment.py` | 6 | T1–T5 implementation |
-| `docs/H2_CONCLUSIONS.md` | 7 | Per-finding verdicts with debate scorecard |
-| `docs/H2_REPORT.md` | 8 | This document |
-| `docs/H2_REPORT_ADDENDUM.md` | 9 | Production re-evaluation |
+| `pre_ml_lab/docs/H2_CRITIQUE.md` | 3 | Seven-point adversarial critique |
+| `pre_ml_lab/docs/H2_DEFENSE.md` | 4 | Point-by-point rebuttal with concessions |
+| `pre_ml_lab/docs/H2_DEBATE.md` | 5 | Multi-turn debate to five agreed empirical tests |
+| `pre_ml_lab/experiments/ato_concat_experiment.py` | 6 | T1–T5 implementation |
+| `pre_ml_lab/docs/H2_CONCLUSIONS.md` | 7 | Per-finding verdicts with debate scorecard |
+| `pre_ml_lab/docs/H2_REPORT.md` | 8 | This document |
+| `pre_ml_lab/docs/H2_REPORT_ADDENDUM.md` | 9 | Production re-evaluation |
 
 All scripts runnable with `uv run <script>`. SEED=42; results stable to ±0.005 AUC across runs.

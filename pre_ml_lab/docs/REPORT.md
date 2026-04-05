@@ -566,15 +566,15 @@ to the 0.750 ceiling under any evaluation that includes enrollment events.
 
 | File | Contents |
 |------|----------|
-| `experiments/ato_experiment3.py` | Experiment implementation (fleet corpus, feature embeddings, corrected enrollment evaluation) |
-| `experiments/ato_fasttext_poc.py` | Original PoC (FastText on device IDs) |
-| `experiments/ato_experiment2.py` | Intermediate experiment (FastText vs Word2Vec vs OOV baseline; i.i.d. + Markov) |
-| `experiments/plot_conclusions.py` | Generates Experiment 2 intermediate figures |
-| `docs/CONCLUSIONS.md` | Detailed findings with debate scorecard and signal hierarchy |
-| `docs/REPORT_ADDENDUM.md` | Production deployment analysis: rotational instability math, retraining pressure, Procrustes alignment |
-| `docs/CRITIQUE.md` | Ten-point systematic critique of the original approach |
-| `docs/DEFENSE.md` | Point-by-point rebuttal |
-| `docs/DEBATE.md` | Multi-turn debate to resolution per point |
+| `pre_ml_lab/experiments/ato_experiment3.py` | Experiment implementation (fleet corpus, feature embeddings, corrected enrollment evaluation) |
+| `pre_ml_lab/experiments/ato_fasttext_poc.py` | Original PoC (FastText on device IDs) |
+| `pre_ml_lab/experiments/ato_experiment2.py` | Intermediate experiment (FastText vs Word2Vec vs OOV baseline; i.i.d. + Markov) |
+| `pre_ml_lab/experiments/plot_conclusions.py` | Generates Experiment 2 intermediate figures |
+| `pre_ml_lab/docs/CONCLUSIONS.md` | Detailed findings with debate scorecard and signal hierarchy |
+| `pre_ml_lab/docs/REPORT_ADDENDUM.md` | Production deployment analysis: rotational instability math, retraining pressure, Procrustes alignment |
+| `pre_ml_lab/docs/CRITIQUE.md` | Ten-point systematic critique of the original approach |
+| `pre_ml_lab/docs/DEFENSE.md` | Point-by-point rebuttal |
+| `pre_ml_lab/docs/DEBATE.md` | Multi-turn debate to resolution per point |
 
 All scripts are self-contained and runnable with `uv run <script>`.
 
