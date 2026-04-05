@@ -28,6 +28,7 @@
 # All other tests (T1, T3, T4, T5, T7, T8) carry over from experiment2.py.
 
 import random
+from pathlib import Path
 import numpy as np
 import matplotlib
 matplotlib.use("Agg")
@@ -40,7 +41,7 @@ random.seed(SEED)
 np.random.seed(SEED)
 
 N_BOOTSTRAP = 1000
-FIGURE_DIR = "/Users/chrissantiago/Dropbox/GitHub/ato/figures/h2_ml_lab"
+FIGURE_DIR = Path(__file__).parent.parent / "figures"
 
 FEATURES = {
     "os":      ["ios", "android", "windows", "macos", "linux"],

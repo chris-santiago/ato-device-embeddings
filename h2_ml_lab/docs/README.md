@@ -9,7 +9,6 @@ Mean-pooling six feature-token embeddings (one per device dimension: OS, browser
 ## Quickstart
 
 ```bash
-cd /Users/chrissantiago/Dropbox/GitHub/ato
 uv run h2_ml_lab/experiments/ato_device_embedding_poc.py
 ```
 

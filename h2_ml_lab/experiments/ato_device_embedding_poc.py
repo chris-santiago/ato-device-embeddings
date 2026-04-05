@@ -24,6 +24,7 @@
 # - Statistical significance beyond one run (bootstrap is in experiment2.py)
 
 import random
+from pathlib import Path
 import numpy as np
 import matplotlib.pyplot as plt
 from gensim.models import FastText
@@ -396,7 +397,7 @@ def main():
         print("  -> Mean-pool has WORSE silhouette (inconsistent with H2)")
 
     # Plot
-    out_fig = "/Users/chrissantiago/Dropbox/GitHub/ato/figures/h2_ml_lab/poc_auc_comparison.png"
+    out_fig = Path(__file__).parent.parent / "figures" / "poc_auc_comparison.png"
     plot_auc_comparison(mp_aucs, cat_aucs, trivial_aucs, out_fig)
 
     print("\n=== PoC complete. Run experiment2.py for bootstrap CIs. ===")
