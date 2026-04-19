@@ -25,6 +25,11 @@ destroys spoof-attack detection while leaving other metrics intact.
 (the hardest attack type, where the attacker matches the victim's OS, browser, and language and
 differs only on timezone). Concat string FastText falls below it.
 
+**Real-world replication (RBA dataset):** The same pipeline applied to the DAS Group RBA
+dataset (~31M real SSO logins, 141 ATO events) produces mean-pool ROC-AUC 0.852 [0.689, 0.975]
+vs. trivial 0.661 — the mean-pool > trivial ordering holds across all tested temporal splits.
+Result is exploratory (n=9 test positives) but consistent. See `h2_rba/docs/REPORT.md`.
+
 ---
 
 ## Recommended deployment
@@ -70,6 +75,11 @@ uv run pre_ml_lab/experiments/h2_rerun_experiment1.py
 # ml-lab structured investigation with config verification
 uv run h2_ml_lab/experiments/robust_config_experiment.py
 uv run h2_ml_lab/experiments/config_verification.py
+
+# Real-world replication on RBA dataset (download + run)
+uv run h2_rba/experiments/data_prep.py            # one-time: downloads ~1GB, writes parquet
+uv run h2_rba/experiments/rba_rerun.py            # default (subsampled, ~5 min)
+uv run h2_rba/experiments/rba_rerun.py --smoke    # fast pipeline check (~30 sec)
 ```
 
 ---
@@ -130,7 +140,8 @@ similarity after every retraining cycle.
 |-----------|----------|
 | `pre_ml_lab/` | Experiments 1–3 and the original/rerun H2 investigation |
 | `h2_ml_lab/` | Structured ml-debate-lab investigation with critic/defender agents and peer review |
-| `TECHNICAL_REPORT.md` | Definitive H2 synthesis: full results, configuration sensitivity analysis, deployment recommendation |
+| `h2_rba/` | Real-world replication on the DAS Group RBA dataset (~31M logins) |
+| `TECHNICAL_REPORT.md` | Definitive H2 synthesis: full results, configuration sensitivity analysis, deployment recommendation, and RBA replication |
 | `archive/` | Original methodology documents that preceded the ml-debate-lab tool |
 
 <details>
@@ -153,6 +164,8 @@ similarity after every retraining cycle.
 | `h2_ml_lab/experiments/ato_device_embedding_experiment3.py` | H2 ml-lab experiment iteration 2 |
 | `h2_ml_lab/experiments/robust_config_experiment.py` | T4/T6/T8 diagnostics under robust config |
 | `h2_ml_lab/experiments/config_verification.py` | T8 comparison: degenerate vs. robust config |
+| `h2_rba/experiments/data_prep.py` | One-shot: download RBA dataset, write parquet |
+| `h2_rba/experiments/rba_rerun.py` | RBA replication: tokenize, train FastText, score, metrics |
 
 ### Research documents
 
@@ -168,5 +181,7 @@ similarity after every retraining cycle.
 | `h2_ml_lab/docs/CONCLUSIONS.md` | H2 ml-lab per-test verdicts |
 | `h2_ml_lab/docs/PEER_REVIEW_R1.md` | Round 1 peer review (3 MAJOR issues resolved) |
 | `h2_ml_lab/docs/PEER_REVIEW_R2.md` | Round 2 peer review (2 MINOR issues, no MAJOR) |
+| `h2_rba/docs/HYPOTHESIS.md` | Pre-run hypothesis for RBA replication |
+| `h2_rba/docs/REPORT.md` | RBA replication report with design audit and sensitivity analysis |
 
 </details>

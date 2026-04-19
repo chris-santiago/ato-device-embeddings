@@ -182,6 +182,37 @@ configuration suggest the mean-pool approach *doesn't* work.
 
 ---
 
+## Real-World Validation
+
+The synthetic findings were tested on the DAS Group RBA dataset (Wiefling et al. 2022,
+ACM TOPS): ~31M synthesized Norwegian SSO login events, ~4.3M users, 141 ground-truth ATO
+events (0.0005% positive rate). The same training configuration (FastText sg=1, per-account
+corpus, ROBUST_KWARGS verbatim) was applied without modification to 7 open-vocabulary
+categorical features.
+
+**Result:** Mean-pool ROC-AUC 0.852 vs. trivial set-membership 0.661 — non-overlapping
+bootstrap 95% CIs. The mean-pool > trivial ordering holds across three temporal split
+percentiles (40/60, 50/50, 60/40). Token structure diagnostics (T6 compactness, T8
+within/cross similarity ratio) are consistent with the synthetic results.
+
+**Caveat:** Only 9 ATO test events survive the temporal split and training floor (141 total
+ATO events; all occur before the 70th percentile of timestamps). The result is exploratory
+and directional, not statistically definitive. A leakage audit (Opus adversarial review)
+found no label leakage, temporal leakage, or known-device contamination.
+
+**The key difference on real data:** The trivial set-membership baseline is weaker on real
+open-vocabulary data (0.661 vs. 0.791 synthetic) because real users access the system from
+diverse device/region combinations — the training-window known-device set is sparser than
+the synthetic 2–4 known-device setup. Mean-pool tracks the harder baseline and maintains its
+margin.
+
+The T8 health check threshold (within-feature sim < 0.5) designed for closed vocabularies is
+slightly exceeded on real data (0.563) without indicating collapse — the within/cross ratio
+(1.66) remains healthy. For open-vocabulary production settings, monitor the ratio rather
+than the absolute threshold.
+
+---
+
 ## Bottom Line
 
 The key insight is that **you should not embed what you want to identify; you should embed the

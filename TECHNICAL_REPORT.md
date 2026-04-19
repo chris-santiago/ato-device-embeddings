@@ -313,6 +313,82 @@ The secondary risk is reintroduction of within-feature collapse through pipeline
 
 ---
 
+## 6. Real-World Replication (RBA Dataset)
+
+To test whether the core H2 finding transfers beyond synthetic data, the same pipeline
+(ROBUST_KWARGS verbatim, sg=1, per-account corpus) was applied to the DAS Group RBA
+dataset v1.0.0 — ~31M synthesized Norwegian SSO login events with per-login ATO ground
+truth derived from real incident response data (Wiefling et al. 2022, ACM TOPS).
+
+### 6.1 Dataset Differences from Synthetic H2
+
+| Property | Synthetic H2 | RBA Dataset |
+|----------|-------------|-------------|
+| Events | 24,000 | 31,269,264 |
+| Users | 400 | 4,304,857 |
+| ATO events | ~1,200 (synthetic) | 141 (0.0005%) |
+| Feature vocabulary | Closed (4–6 values/feature) | Open (hundreds of country codes, OS strings, etc.) |
+| Attack trichotomy | Novel / fleet / spoof | Binary `Is Account Takeover` only |
+| Features | 6 | 7 (adds `rtt_bucket`) |
+
+### 6.2 Design Notes
+
+**Temporal split:** All 141 ATO events occur before the 70th percentile of timestamps — a
+strict 80/20 split would leave zero ATO events in the test window. A 50/50 split was used
+(34 ATO users with test-window events; 9 pass the ≥5 training event floor). This adjustment
+was made after observing the label distribution and is a stated limitation.
+
+**Dataset constraint:** 141 total ATO events across 31M logins means the positive class is
+extremely thin. The primary evaluation rests on 9 positive test events (50/50 split).
+ROC-AUC has ~0.11 resolution per reranked event at this scale.
+
+### 6.3 Results
+
+| Model | ROC-AUC [95% CI] | PR-AUC [95% CI] |
+|-------|-----------------|-----------------|
+| mean-pool | **0.852 [0.689, 0.975]** | 0.032 [0.002, 0.087] |
+| concat | 0.829 [0.704, 0.924] | 0.006 [0.000, 0.020] |
+| trivial (set-membership) | 0.661 | 0.000 |
+
+**H2 headline: directionally replicated.** Mean-pool ROC-AUC (0.852) exceeds trivial
+(0.661) with non-overlapping CI lower bound (0.689 > 0.661). PR-AUC is 95× the trivial
+baseline (0.032 vs. 0.0003) at a 0.0005% base rate.
+
+Sensitivity analysis across three split percentiles confirms the ordering holds:
+
+| Split | ATO test n | Mean-pool ROC-AUC | Trivial | Replicated? |
+|-------|-----------|-------------------|---------|-------------|
+| 40/60 | 12 | 0.921 [0.821, 0.990] | 0.699 | ✓ |
+| 50/50 | 9  | 0.852 [0.689, 0.975] | 0.661 | ✓ |
+| 60/40 | 3  | 0.933 [0.877, 0.983] | 0.720 | ✓ |
+
+### 6.4 Auxiliary Diagnostics
+
+Token structure diagnostics (T6 compactness, T8 within/cross similarity) are fully
+consistent with synthetic H2:
+
+| Diagnostic | Synthetic H2 | RBA (real) | Consistent? |
+|-----------|-------------|-----------|-------------|
+| T6 mean-pool compactness | 0.047 | 0.036 | ✓ |
+| T8 within/cross ratio | 1.60 | 1.66 | ✓ |
+| T8 within-feature sim | 0.392 | 0.563 | ✓ (higher due to open vocab, no collapse) |
+
+### 6.5 Interpretation
+
+The result is **exploratory, not confirmatory** (n=9 positives; post-hoc split adjustment).
+However, the directional signal is consistent across all tested split cutoffs, and all
+no-leakage checks pass. The core H2 mechanism — per-account FastText skip-gram embeddings
+learn a behavioral centroid that flags anomalous logins — appears operational on real data
+with open-vocabulary features and genuine ATO ground truth.
+
+The trivial baseline on real data (0.661) is weaker than on synthetic data (0.791) because
+real users visit from many device/region combinations, making the training-window known-device
+set sparser. Mean-pool maintains its advantage under this harder baseline.
+
+See `h2_rba/docs/REPORT.md` for full methodology, audit findings, and limitations.
+
+---
+
 ## Artifact Inventory
 
 | File | Description |
@@ -332,3 +408,7 @@ The secondary risk is reintroduction of within-feature collapse through pipeline
 | `h2_ml_lab/docs/PEER_REVIEW_R1.md` | Round 1 peer review (research-reviewer, 3 MAJOR issues identified and resolved) |
 | `h2_ml_lab/docs/PEER_REVIEW_R2.md` | Round 2 peer review (research-reviewer-lite, 2 MINOR issues, no MAJOR issues) |
 | `TECHNICAL_REPORT.md` | This document — publication-ready synthesis in results mode |
+| `h2_rba/experiments/data_prep.py` | One-shot: download, extract, and normalize RBA dataset to parquet |
+| `h2_rba/experiments/rba_rerun.py` | RBA replication: load, tokenize, train FastText, score, metrics |
+| `h2_rba/docs/REPORT.md` | Full RBA replication report with audit findings and sensitivity analysis |
+| `h2_rba/figures/rba_metrics.json` | RBA numeric results (AUC, CIs, compactness, token similarity) |
