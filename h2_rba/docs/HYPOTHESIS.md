@@ -1,5 +1,11 @@
 # H2-RBA Hypothesis
 
+> **Note:** This document was revised post-data-inspection. The pre-registered plan used
+> an 80/20 temporal split and ≥10 training events per user. After observing that all 141 ATO
+> events occur before the 70th percentile, the split was changed to 50/50 and the training
+> floor was lowered to ≥5 events. See REPORT.md §2 for the full rationale.
+
+
 **Claim:** The core H2 finding — that FastText skip-gram mean-pool centroid scoring
 outperforms a trivial set-membership baseline at detecting account takeover events —
 will replicate on the real-world RBA dataset.
@@ -18,8 +24,8 @@ vs. trivial 0.50) depended on clean label construction and a controlled feature 
 ## Replication target
 
 - **Dataset:** DAS Group RBA dataset v1.0.0 — synthesized Norwegian SSO login logs,
-  ~33M events, ~3.3M users, with per-login `Is Account Takeover` ground truth derived
-  from real incident response data.
+  31,269,264 events, 4,304,857 users, with per-login `Is Account Takeover` ground truth
+  derived from real incident response data.
 - **Features:** `os`, `browser`, `device_type`, `country`, `region`, `asn_bucket`,
   `rtt_bucket` (schema-driven; values are open-vocabulary from the real dataset).
 - **Label:** binary `Is Account Takeover` — no novel/fleet/spoof trichotomy.

@@ -91,9 +91,9 @@ performance. This is a structural property of the concatenation, not a positiona
 
 | Attack Type   | AUC             | Notes                              |
 |---------------|-----------------|-------------------------------------|
-| Novel         | 0.985           | Strong                              |
-| Fleet/reuse   | 0.920           | Strong                              |
-| Spoof         | 0.798           | Beats trivial baseline (0.791) ✓    |
+| Novel         | 0.993           | Strong                              |
+| Fleet/reuse   | 0.939           | Strong                              |
+| Spoof         | 0.818           | Beats trivial baseline (0.791) ✓    |
 
 **Why it works:**
 
@@ -161,6 +161,11 @@ configuration suggest the mean-pool approach *doesn't* work.
 ---
 
 ## Recommended Production Architecture
+
+> **Note:** The architecture below is based on synthetic-data findings (see Results above).
+> Real-world directional support exists (RBA dataset replication, exploratory) but the
+> deployment recommendation is not yet backed by a statistically definitive real-world study.
+
 
 ### Real-time scoring (novel + spoof attacks)
 - **Signal:** Mean-pool FastText on feature tokens

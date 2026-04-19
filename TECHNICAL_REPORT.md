@@ -4,7 +4,7 @@
 
 ## Abstract
 
-Mean-pooling six feature-token FastText embeddings outperforms concatenated-string FastText for device-fingerprint anomaly detection in Account Takeover (ATO) pipelines under a robust training configuration (skip-gram, per-account corpus). Across all three attack types evaluated (novel, fleet, spoof), mean-pool FastText achieves higher ROC-AUC and tighter per-account centroid compactness than concat. The spoof AUC advantage is 0.818 vs. 0.763 (mean-pool vs. concat w=1), with bootstrap 95% CIs excluding zero on all four primary deltas. Mean-pool also beats the trivial set-membership baseline (0.791) on spoof; concat w=1 does not. A critical cautionary finding: a degenerate training configuration (CBOW, per-event corpus) causes within-feature embedding collapse (within-feature cosine similarity = 0.9993), which eliminates timezone discriminability and inverts all conclusions. T8 (token similarity monitoring) is a required deployment check to detect collapse before it silently degrades spoof detection. Mean-pool FastText (sg=1, per-account corpus, epochs=20, negative=10) is recommended for production deployment.
+Mean-pooling six feature-token FastText embeddings outperforms concatenated-string FastText for device-fingerprint anomaly detection in Account Takeover (ATO) pipelines under a robust training configuration (skip-gram, per-account corpus). Across all three attack types evaluated (novel, fleet, spoof), mean-pool FastText achieves higher ROC-AUC and tighter per-account centroid compactness than concat. The spoof AUC advantage is 0.818 vs. 0.763 (mean-pool vs. concat w=1), with bootstrap 95% CIs excluding zero on all four primary deltas. Mean-pool also beats the trivial set-membership baseline (0.791) on spoof; concat w=1 does not. A critical cautionary finding: a degenerate training configuration (CBOW, per-event corpus) causes within-feature embedding collapse (within-feature cosine similarity = 0.9993), which eliminates timezone discriminability and inverts all conclusions. T8 (token similarity monitoring) is a required deployment check to detect collapse before it silently degrades spoof detection. Mean-pool FastText (sg=1, per-account corpus, epochs=20, negative=10) is recommended for production deployment. A real-world replication on the DAS Group RBA dataset (~31M login events, 141 ATO events) directionally supports the finding (mean-pool ROC-AUC 0.852 vs. trivial 0.661, consistent across three temporal split cutoffs), though results are exploratory given only 9 positive test events in the evaluation window (see §6).
 
 ---
 
@@ -370,7 +370,7 @@ consistent with synthetic H2:
 | Diagnostic | Synthetic H2 | RBA (real) | Consistent? |
 |-----------|-------------|-----------|-------------|
 | T6 mean-pool compactness | 0.047 | 0.036 | ✓ |
-| T8 within/cross ratio | 1.60 | 1.66 | ✓ |
+| T8 within/cross ratio | 1.14 | 1.66 | ✓ |
 | T8 within-feature sim | 0.392 | 0.563 | ✓ (higher due to open vocab, no collapse) |
 
 ### 6.5 Interpretation
@@ -411,4 +411,7 @@ See `h2_rba/docs/REPORT.md` for full methodology, audit findings, and limitation
 | `h2_rba/experiments/data_prep.py` | One-shot: download, extract, and normalize RBA dataset to parquet |
 | `h2_rba/experiments/rba_rerun.py` | RBA replication: load, tokenize, train FastText, score, metrics |
 | `h2_rba/docs/REPORT.md` | Full RBA replication report with audit findings and sensitivity analysis |
-| `h2_rba/figures/rba_metrics.json` | RBA numeric results (AUC, CIs, compactness, token similarity) |
+| `h2_rba/figures/rba_metrics.json` | RBA numeric results — canonical source for all quoted RBA figures |
+| `h2_rba/figures/rba_summary_auc.png` | ROC-AUC bar chart with bootstrap CIs (mean-pool, concat, trivial) |
+| `h2_rba/figures/rba_pr_curve.png` | Precision-recall curve |
+| `h2_rba/figures/rba_t6_compactness.png` | Per-account centroid compactness histogram |

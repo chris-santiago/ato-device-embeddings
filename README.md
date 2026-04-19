@@ -2,7 +2,7 @@
 
 Can word embeddings trained on login device sequences detect account takeover in real time?
 **Yes — with the right architecture.** FastText on structured feature tokens (OS, browser,
-timezone, language) achieves AUC 0.985 on novel attacks and is fast enough for sub-millisecond
+timezone, language) achieves AUC 0.993 on novel attacks and is fast enough for sub-millisecond
 login scoring. Raw device ID embeddings do not work.
 
 A secondary finding with operational consequences: **how you train the embeddings matters as
@@ -12,6 +12,9 @@ destroys spoof-attack detection while leaving other metrics intact.
 ---
 
 ## Results at a glance
+
+*Synthetic evaluation (400 accounts, closed-vocabulary features, novel/fleet/spoof attack types).
+Real-world replication on the RBA dataset is exploratory — see below.*
 
 | Signal | Novel AUC | Fleet AUC | Spoof AUC | Verdict |
 |--------|-----------|-----------|-----------|---------|
@@ -28,7 +31,8 @@ differs only on timezone). Concat string FastText falls below it.
 **Real-world replication (RBA dataset):** The same pipeline applied to the DAS Group RBA
 dataset (~31M real SSO logins, 141 ATO events) produces mean-pool ROC-AUC 0.852 [0.689, 0.975]
 vs. trivial 0.661 — the mean-pool > trivial ordering holds across all tested temporal splits.
-Result is exploratory (n=9 test positives) but consistent. See `h2_rba/docs/REPORT.md`.
+Result is exploratory (n=9 test positives) but consistent. See `h2_rba/docs/REPORT.md` and
+`TECHNICAL_REPORT.md` §6 for full results and sensitivity analysis.
 
 ---
 

@@ -142,7 +142,7 @@ Mean-pool produces tighter per-account clusters than concat, consistent with syn
 | mean-pool | 0.036 | [0.035, 0.037] |
 | concat | 0.129 | [0.126, 0.132] |
 
-Mean-pool compactness on real data (0.036) is similar to synthetic H2 (0.033). The ~3.6×
+Mean-pool compactness on real data (0.036) is similar to synthetic H2 (0.047). The ~3.6×
 tighter clustering relative to concat is preserved on real open-vocabulary features.
 
 ### 3.3 T8 Token Similarity (Embedding Health Check)
@@ -165,8 +165,8 @@ meaningful diagnostic on open-vocabulary data.
 | Mean-pool ROC-AUC | 0.818 (spoof) | 0.852 (binary ATO) | ✓ (different label) |
 | Trivial ROC-AUC | 0.791 | 0.661 | N/A (weaker baseline on real data) |
 | Mean-pool vs. trivial | +0.027 | +0.191 | ✓ |
-| T6 mean-pool compactness | 0.033 | 0.036 | ✓ |
-| T8 within/cross ratio | 0.392/0.245 = 1.60 | 0.563/0.339 = 1.66 | ✓ |
+| T6 mean-pool compactness | 0.047 | 0.036 | ✓ |
+| T8 within/cross ratio | 0.392/0.344 = 1.14 | 0.563/0.339 = 1.66 | ✓ |
 
 The note on the trivial baseline: in synthetic H2, the trivial baseline scored 0.791 because
 the closed-vocabulary spoof attack differs on exactly one feature (timezone) from the
@@ -268,7 +268,7 @@ diagnostics (T6 compactness, T8 within/cross ratio) are fully consistent with sy
 |------|-------------|
 | `h2_rba/experiments/data_prep.py` | Downloads, extracts, and normalizes RBA dataset to parquet |
 | `h2_rba/experiments/rba_rerun.py` | Main experiment: load, tokenize, train FastText, score, metrics |
-| `h2_rba/figures/rba_metrics.json` | Numeric results (AUC, CIs, compactness, token similarity) |
+| `h2_rba/figures/rba_metrics.json` | Numeric results — canonical source for all quoted RBA figures |
 | `h2_rba/figures/rba_summary_auc.png` | ROC-AUC bar chart with bootstrap CIs |
 | `h2_rba/figures/rba_pr_curve.png` | PR curve |
 | `h2_rba/figures/rba_t6_compactness.png` | Per-account compactness histogram |
