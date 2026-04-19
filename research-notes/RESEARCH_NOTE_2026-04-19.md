@@ -53,3 +53,67 @@ local-only (gitignored via `slides/.gitignore`).
 
 - If pilot data available: run `rba_rerun.py` pattern against production feature schema; compare mean-pool vs. current set-membership baseline; report PR-AUC (primary) and ROC-AUC with bootstrap CIs
 - Consider stratified bootstrap as a code improvement to `rba_rerun.py` (Opus audit recommendation)
+
+## Appendix
+
+## Why CBOW + Per-Event Corpus Collapses Within-Feature Embeddings
+
+### The corpus structure is the problem
+
+In the per-event setup, every login event becomes one training sentence:
+
+["os_ios", "browser_safari", "tz_utc-5", "lang_en", "net_wifi", "screen_small"]
+["os_ios", "browser_safari", "tz_utc-8", "lang_en", "net_wifi", "screen_small"]
+["os_ios", "browser_safari", "tz_utc+0", "lang_en", "net_wifi", "screen_small"]
+
+Notice what's identical across all three sentences: every token except the timezone. The
+positional structure is rigid — slot 0 is always an OS token, slot 2 is always a timezone
+token.
+
+### What CBOW does with this
+
+CBOW predicts the center token from its surrounding context. With a window of 6,
+the context for tz_utc-5 is [os_ios, browser_safari, lang_en, net_wifi, screen_small] —
+the same five tokens appear as context for every timezone value across every sentence.
+
+predict(tz_utc-5)  ← context: [os_ios, browser_safari, lang_en, net_wifi, screen_small]
+predict(tz_utc-8)  ← context: [os_ios, browser_safari, lang_en, net_wifi, screen_small]
+predict(tz_utc+0)  ← context: [os_ios, browser_safari, lang_en, net_wifi, screen_small]
+
+The model is being trained to predict each timezone token from an **identical context
+distribution.** The gradient signal that updates each timezone embedding is therefore
+identical — after enough epochs, the optimizer finds that the loss is minimized by
+converging all timezone vectors toward the same point.
+
+This is not a bug. The model is doing exactly what it's supposed to do: tokens that appear
+in the same context should get similar embeddings. It's just that the corpus structure
+forces all timezone values to share the same context.
+
+### Why skip-gram + per-account corpus fixes it
+
+**Per-account corpus** flattens all of a user's events into one long sentence:
+
+[os_ios, browser_safari, tz_utc-5, lang_en, ...,
+  os_windows, browser_chrome, tz_utc-8, lang_fr, ...,
+  os_ios, browser_safari, tz_utc+0, lang_en, ...]
+
+Now tz_utc-5 has browser_safari as a neighbor in some positions and browser_chrome
+nearby in others. Different timezone values co-occur with different OS/browser/language
+combinations across events, so their context distributions diverge.
+
+**Skip-gram** inverts the prediction task: predict context tokens from the center token.
+Each timezone value must now predict which OS, browser, and language tokens are likely to
+appear near it — and because tz_utc-5 and tz_utc-8 appear in different account
+contexts, they develop genuinely different predictive distributions and thus genuinely
+different embedding vectors.
+
+### Why it's dangerous
+
+Novel AUC and fleet AUC stay healthy under collapse (~0.88 and ~0.92) because those attack
+types differ on many features at once — even with timezone collapsed, the OS and browser
+differences carry enough signal. Only spoof attacks — where the attacker matches 5 of 6
+features and differs only on timezone — expose the failure. With timezone embeddings
+collapsed, mean-pool has nothing to work with and AUC drops to 0.384 (below chance, because
+high cosine distance now slightly anti-correlates with anomaly due to noise).
+
+*A monitoring dashboard watching aggregate AUC sees nothing wrong.*
