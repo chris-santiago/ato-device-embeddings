@@ -26,29 +26,32 @@ REQUIRED_FIELDS = {
     "discovery":   ["description"],
     "hypothesis":  ["description"],
     "experiment":  ["description", "verdict"],
-    "post_mortem": ["description", "what_failed", "root_cause"],
+    "post_mortem": ["description", "what_failed", "root_cause", "linked_issue_id"],
     "lesson":      ["description"],
+    "memo":        ["description"],
     "summary":     ["description"],
     "checkpoint":  ["in_progress"],
-    "git":         ["commit_hash", "message", "branch"],
+    "git":         ["message", "branch"],
 }
 
 OPTIONAL_FIELDS = {
     "issue":       ["tags", "context"],
-    "resolution":  ["linked_issue_id", "approach"],
-    "decision":    ["alternatives"],
-    "discovery":   ["implications", "source"],
-    "hypothesis":  ["expected_result", "metric"],
-    "experiment":  ["linked_hypothesis_id", "metric", "result"],
-    "post_mortem": ["contributing_factors", "lessons", "linked_issue_id"],
+    "resolution":  ["linked_issue_id", "approach", "evidence"],
+    "decision":    ["alternatives", "implications", "linked_issue_id", "linked_id"],
+    "discovery":   ["implications", "source", "linked_issue_id"],
+    "hypothesis":  ["expected_result", "metric", "linked_issue_id"],
+    "experiment":  ["linked_hypothesis_id", "linked_issue_id", "metric", "result"],
+    "post_mortem": ["contributing_factors", "lessons", "severity", "scope", "remediation", "detail"],
     "lesson":      ["context", "applies_to", "linked_id"],
+    "memo":        ["tags", "context", "detail", "linked_issue_id", "linked_id"],
     "summary":     ["key_decisions", "open_threads"],
     "checkpoint":  ["pending_decisions", "recently_completed", "key_context", "git_state", "open_threads"],
-    "git":         ["files_changed", "diff_summary"],
+    "git":         ["commit_hash", "files_changed", "diff_summary"],
 }
 
-VALID_SEVERITIES = {"low", "moderate", "high", "critical"}
+VALID_SEVERITIES = {"low", "minor", "moderate", "high", "critical"}
 VALID_VERDICTS   = {"confirmed", "refuted", "inconclusive"}
+VALID_SCOPES     = {"active", "future"}
 
 LIST_FIELDS = {"tags", "files_changed", "key_decisions", "open_threads"}
 
@@ -87,7 +90,7 @@ def build_entry(args):
         "timestamp":  datetime.now(timezone.utc).isoformat(),
         "type":       entry_type,
         "project":    get_repo_name(),
-        "session_id": os.environ.get("CLAUDE_SESSION_ID"),
+        "session_id": os.environ.get("CLAUDE_SESSION_ID") or str(os.getppid()),
     }
 
     # Collect all known fields for this type
@@ -116,6 +119,8 @@ def build_entry(args):
         sys.exit(f"ERROR: Invalid severity '{entry['severity']}'. Must be one of: {', '.join(sorted(VALID_SEVERITIES))}")
     if "verdict" in entry and entry["verdict"] not in VALID_VERDICTS:
         sys.exit(f"ERROR: Invalid verdict '{entry['verdict']}'. Must be one of: {', '.join(sorted(VALID_VERDICTS))}")
+    if "scope" in entry and entry["scope"] not in VALID_SCOPES:
+        sys.exit(f"ERROR: Invalid scope '{entry['scope']}'. Must be one of: {', '.join(sorted(VALID_SCOPES))}")
 
     return entry
 
