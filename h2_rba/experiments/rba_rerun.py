@@ -259,6 +259,23 @@ def score_trivial(users: dict) -> tuple[list, list]:
 # ---------------------------------------------------------------------------
 # Metrics
 # ---------------------------------------------------------------------------
+def threshold_metrics_at_top_pct(scores: list, labels: list, top_pct: float = 0.01) -> dict:
+    sc = np.array(scores)
+    lb = np.array(labels)
+    cutoff = np.percentile(sc, 100 * (1 - top_pct))
+    preds = (sc >= cutoff).astype(int)
+    tp = int(((preds == 1) & (lb == 1)).sum())
+    fp = int(((preds == 1) & (lb == 0)).sum())
+    fn = int(((preds == 0) & (lb == 1)).sum())
+    precision = tp / (tp + fp) if (tp + fp) > 0 else 0.0
+    recall    = tp / (tp + fn) if (tp + fn) > 0 else 0.0
+    f1 = 2 * precision * recall / (precision + recall) if (precision + recall) > 0 else 0.0
+    return {
+        "threshold": float(cutoff), "tp": tp, "fp": fp, "fn": fn,
+        "precision": precision, "recall": recall, "f1": f1,
+        "flagged": int(preds.sum()), "total": len(sc),
+    }
+
 def bootstrap_metrics(
     scores: list, labels: list, n_boot: int = N_BOOTSTRAP, seed: int = SEED
 ) -> tuple:
@@ -520,6 +537,18 @@ def main() -> None:
 
     headline = "REPLICATED" if mp_roc > triv_roc else "NOT REPLICATED"
     print(f"\n  H2 headline (mean-pool > trivial ROC-AUC): {headline}")
+
+    print(f"\n  Top-1% threshold  (flag highest 1% of distances as ATO):")
+    print(f"  {'Model':<12} {'Threshold':>10} {'Flagged':>8} {'TP':>5} {'FP':>7} {'Precision':>10} {'Recall':>8} {'F1':>8}")
+    print("  " + "-" * 74)
+    for name, sc, lb in [
+        ("mean-pool", mp_scores,   mp_labels),
+        ("concat",    cat_scores,  cat_labels),
+        ("trivial",   triv_scores, triv_labels),
+    ]:
+        m = threshold_metrics_at_top_pct(sc, lb, top_pct=0.01)
+        print(f"  {name:<12} {m['threshold']:>10.4f} {m['flagged']:>8,} {m['tp']:>5} {m['fp']:>7,}"
+              f" {m['precision']:>10.4f} {m['recall']:>8.4f} {m['f1']:>8.4f}")
 
     print("\n[6/7] T6 compactness, T8 token similarity ...")
     mp_c,  mp_c_lo,  mp_c_hi  = bootstrap_mean_compactness(users, embed_mp,  mp_model)
