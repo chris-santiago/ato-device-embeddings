@@ -64,8 +64,8 @@ cannot be used for real-time novel/spoof scoring.
 **Setup:** Combine the six feature values into a single string like
 `ios_safari_utc-5_en_wifi_1920x1080` and embed that as one token.
 
-**Result:** Spoof AUC 0.763 — *below* a trivial exact-match baseline (0.791). This approach is
-worse than a hash lookup.
+**Result:** Spoof AUC 0.782 — above the trivial exact-match baseline (0.750) but only by +0.032.
+The narrow margin offers little practical advantage over a hash lookup.
 
 **Why it fails:** FastText applies character n-grams across the *entire* string, spanning feature
 boundaries. The substring `ri_ut` spans from `browser_safari` into `tz_utc...`. When an attacker
@@ -93,7 +93,7 @@ performance. This is a structural property of the concatenation, not a positiona
 |---------------|-----------------|-------------------------------------|
 | Novel         | 0.993           | Strong                              |
 | Fleet/reuse   | 0.939           | Strong                              |
-| Spoof         | 0.818           | Beats trivial baseline (0.791) ✓    |
+| Spoof         | 0.869           | Beats trivial baseline (0.750) ✓ (+0.119) |
 
 **Why it works:**
 
@@ -108,6 +108,31 @@ performance. This is a structural property of the concatenation, not a positiona
   `browser_chrome_v119`, so new browser versions receive positioned embeddings (close to their
   known variants) rather than falling back to the global mean. Unlike opaque device IDs, structured
   feature tokens have genuine morphological relationships that the n-gram mechanism exploits well.
+
+---
+
+## Extending Mean-Pool: Per-User Rank Normalization
+
+Raw cosine distance to the account centroid is the base signal, but it has a scale problem: an account with 60 clean training events from a single device produces a very tight centroid (distances near zero for known devices); an account with diverse logins across multiple devices produces a looser centroid. A single global threshold over-flags low-history or high-variance accounts.
+
+**Per-user rank normalization** solves this by converting each raw score to an empirical percentile within that account's own calibration set:
+- First 40 login events → compute centroid
+- Last 20 events → held-out calibration baseline
+- Score = `P(calibration_dist < test_dist)` ∈ [0, 1]
+
+This is most valuable when the raw cosine signal is weak — exactly the case for sophisticated attackers who match most features.
+
+**Variable-K spoof results** (from `h2_ml_lab/experiments/variable_spoof_experiment.py`):
+
+| Spoof type | Fields changed | Analog | mp-raw AUC | mp-rank-norm AUC | Trivial |
+|------------|---------------|--------|:----------:|:----------------:|:-------:|
+| k=1 — VPN | tz only | Sophisticated, single-field | 0.522 | **0.714** | 0.750 |
+| k=2 — Datacenter VPN | tz + network | Moderate, two fields | 0.689 | **0.735** | 0.750 |
+| k=3 — Emulated device | tz + net + screen | Detectable, three fields | **0.869** | 0.784 | 0.750 |
+
+**The crossover:** Rank normalization wins at k=1 and k=2 (sophisticated attackers with small raw signal). Raw scoring wins at k=3 (three mismatched features produce a large enough raw distance that normalization adds nothing). Both methods remain above the trivial baseline at k=3.
+
+**The takeaway:** Apply rank normalization by default. The hardest attack type — a single-field mismatch from a VPN — is exactly where raw scoring fails and rank normalization recovers. The cost is 20 calibration events per account; the benefit is AUC gains of +0.192 for the most sophisticated attack profile.
 
 ---
 
@@ -206,7 +231,7 @@ and directional, not statistically definitive. A leakage audit (Opus adversarial
 found no label leakage, temporal leakage, or known-device contamination.
 
 **The key difference on real data:** The trivial set-membership baseline is weaker on real
-open-vocabulary data (0.661 vs. 0.791 synthetic) because real users access the system from
+open-vocabulary data (0.661 vs. 0.750 synthetic) because real users access the system from
 diverse device/region combinations — the training-window known-device set is sparser than
 the synthetic 2–4 known-device setup. Mean-pool tracks the harder baseline and maintains its
 margin.

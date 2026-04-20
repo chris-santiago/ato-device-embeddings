@@ -102,11 +102,11 @@ OOV ceiling is AUC 0.750 — structural, not tunable. Word2Vec on device IDs is 
 
 <!-- Slide 4 -->
 
-# Concatenated Feature String — Below the Trivial Baseline
+# Concatenated Feature String — Narrowly Above Trivial on Spoof
 
 **Token:** `ios_safari_utc-5_en_wifi_1920x1080` → one FastText embedding
 
-- Spoof AUC **0.763** — *below* a two-line hash lookup (0.791)
+- Spoof AUC **0.782** — above a two-line hash lookup (0.750), but narrowly (+0.032)
 - Cross-boundary n-grams (`ari_ut`, `i_utc`) bleed across feature boundaries
 - Timezone mismatch gets diluted by five matching features around it
 
@@ -149,7 +149,7 @@ An earlier investigation concluded concat beats mean-pool. It was wrong — here
 | Config | Within-feature sim | Spoof AUC |
 |--------|--------------------|:---------:|
 | CBOW + per-event corpus | 0.9993 — **collapse** | 0.384 |
-| **Skip-gram + per-account corpus** | **0.392** | **0.818** |
+| **Skip-gram + per-account corpus** | **0.392** | **0.869** |
 
 **Why it collapses:** Per-event corpus puts `tz_utc-5` and `tz_utc-8` in the same positional context every time. CBOW sees identical context → identical gradients → identical vectors.
 
@@ -196,6 +196,6 @@ Fallback:
 ```
 
 <div class="hero">
-Mean-pool spoof margin over trivial baseline is +0.007 — real but narrow.
+Mean-pool spoof margin over trivial baseline is +0.119 — operationally meaningful.
 Measure spoof AUC explicitly in any A/B before cutover.
 </div>

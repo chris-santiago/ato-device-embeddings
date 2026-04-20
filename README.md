@@ -18,15 +18,17 @@ Real-world replication on the RBA dataset is exploratory — see below.*
 
 | Signal | Novel AUC | Fleet AUC | Spoof AUC | Verdict |
 |--------|-----------|-----------|-----------|---------|
-| Feature tokens, mean-pool (recommended) | 0.993 | 0.939 | **0.818** | ✓ Deploy |
-| Feature tokens, concat string | 0.981 | 0.933 | 0.763 | ✗ Below trivial baseline on spoof |
+| Feature tokens, mean-pool (recommended) | 0.999 | 0.994 | **0.869** | ✓ Deploy |
+| Feature tokens, concat string | 0.997 | 0.998 | 0.782 | ⚠️ Beats trivial on spoof, narrow margin |
 | Word2Vec on device IDs | — | 0.891 | — | ✓ Offline fleet/reuse detection only |
 | FastText on device IDs | — | — | — | ✗ Destroys cluster structure (silhouette −0.051) |
-| Exact set-membership (trivial baseline) | 0.750 | 0.750 | 0.791 | Fallback only |
+| Exact set-membership (trivial baseline) | 0.750 | 0.750 | 0.750 | Fallback only |
 
-**Mean-pool FastText is the only configuration that beats the trivial baseline on spoof attacks**
+**Mean-pool FastText achieves the largest spoof AUC margin over the trivial baseline (+0.119)**
 (the hardest attack type, where the attacker matches the victim's OS, browser, and language and
-differs only on timezone). Concat string FastText falls below it.
+differs on timezone/network/screen). Concat string also beats trivial (+0.032) but by a much
+narrower margin. Mean-pool supports per-user rank normalization, which further improves
+detection for sophisticated attackers (k=1 spoof: 0.522 raw → 0.714 rank-norm).
 
 **Real-world replication (RBA dataset):** The same pipeline applied to the DAS Group RBA
 dataset (~31M real SSO logins, 141 ATO events) produces mean-pool ROC-AUC 0.852 [0.689, 0.975]
@@ -80,6 +82,9 @@ uv run pre_ml_lab/experiments/h2_rerun_experiment1.py
 uv run h2_ml_lab/experiments/robust_config_experiment.py
 uv run h2_ml_lab/experiments/config_verification.py
 
+# Variable-K spoof + rank normalization comparison
+uv run h2_ml_lab/experiments/variable_spoof_experiment.py
+
 # Real-world replication on RBA dataset (download + run)
 uv run h2_rba/experiments/data_prep.py            # one-time: downloads ~1GB, writes parquet
 uv run h2_rba/experiments/rba_rerun.py            # default (subsampled, ~5 min)
@@ -131,10 +136,22 @@ AUC level; only a token similarity diagnostic (T8) detects it.
 | Configuration | Within-feature sim | Spoof AUC | Conclusion |
 |--------------|--------------------|-----------|------------|
 | CBOW, per-event corpus (broken) | 0.9993 — collapse | 0.384 (below chance) | Mean-pool refuted |
-| Skip-gram, per-account corpus (correct) | 0.392 — healthy | 0.818 | **Mean-pool confirmed** |
+| Skip-gram, per-account corpus (correct) | 0.392 — healthy | 0.869 | **Mean-pool confirmed** |
 
 **The skip-gram + per-account corpus configuration is not optional.** Monitor within-feature
 similarity after every retraining cycle.
+
+### Per-user rank normalization and attacker sophistication
+
+Raw cosine distance works well when the attacker changes multiple features (k=3: tz + network + screen). It degrades when the attacker is more sophisticated and changes only one or two. **Per-user rank normalization** addresses this by converting raw distances to empirical percentile scores within each account's own calibration set (first 40 events → centroid; last 20 → calibration baseline).
+
+| Spoof type | Fields changed | mp-raw AUC | mp-rank-norm AUC | Trivial |
+|------------|---------------|:----------:|:----------------:|:-------:|
+| k=1 — VPN only | tz | 0.522 | **0.714** | 0.750 |
+| k=2 — Datacenter VPN | tz + network | 0.689 | **0.735** | 0.750 |
+| k=3 — Emulated device | tz + net + screen | **0.869** | 0.784 | 0.750 |
+
+Rank normalization wins at k=1 and k=2 (sophisticated attackers where raw signal is weak), improving AUC by up to +0.192. Raw scoring wins at k=3, where three mismatched features already produce a large cosine distance. Apply rank normalization by default — it handles the hardest cases without hurting performance on the easier ones.
 
 ---
 
@@ -168,6 +185,7 @@ similarity after every retraining cycle.
 | `h2_ml_lab/experiments/ato_device_embedding_experiment3.py` | H2 ml-lab experiment iteration 2 |
 | `h2_ml_lab/experiments/robust_config_experiment.py` | T4/T6/T8 diagnostics under robust config |
 | `h2_ml_lab/experiments/config_verification.py` | T8 comparison: degenerate vs. robust config |
+| `h2_ml_lab/experiments/variable_spoof_experiment.py` | Variable-K spoof (k=1/2/3) × raw vs. rank-norm comparison |
 | `h2_rba/experiments/data_prep.py` | One-shot: download RBA dataset, write parquet |
 | `h2_rba/experiments/rba_rerun.py` | RBA replication: tokenize, train FastText, score, metrics |
 

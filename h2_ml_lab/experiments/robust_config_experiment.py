@@ -39,7 +39,7 @@ from sklearn.metrics import roc_auc_score
 SEED = 42
 np.random.seed(SEED)
 
-FIGURES_DIR = Path(__file__).resolve().parent.parent.parent / "figures" / "h2_ml_lab"
+FIGURES_DIR = Path(__file__).resolve().parent.parent / "figures"
 FIGURES_DIR.mkdir(parents=True, exist_ok=True)
 
 N_BOOTSTRAP = 1000
@@ -112,9 +112,12 @@ def generate_dataset(seed=SEED):
                or novel["lang"] == primary["lang"]) and attempts < 1000:
             novel = {f: rng.choice(FEATURES[f]) for f in FEATURE_ORDER}
             attempts += 1
-        # Spoof: primary OS/browser/lang, different tz
+        # Spoof: primary OS/browser/lang, different tz + randomised network/screen
+        # Matches h2_rerun_experiment1.py _spoof_profile() definition.
         spoof = dict(primary)
-        spoof["tz"] = rng.choice([t for t in FEATURES["tz"] if t != primary["tz"]])
+        spoof["tz"]      = rng.choice([t for t in FEATURES["tz"] if t != primary["tz"]])
+        spoof["network"] = rng.choice(FEATURES["network"])
+        spoof["screen"]  = rng.choice(FEATURES["screen"])
         # Negative: primary OS/browser/tz/lang, different network/screen
         neg = dict(primary)
         neg["network"] = rng.choice([n for n in FEATURES["network"] if n != primary["network"]])

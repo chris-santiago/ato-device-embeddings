@@ -68,7 +68,7 @@ Monthly:
 ## 4. Failure Modes
 
 - **Within-feature collapse:** The primary production risk unique to mean-pool. If training configuration drifts (e.g., library default changes, corpus construction bug), collapse silently destroys spoof detection while novel/fleet AUC appears healthy. T8 monitoring after every retraining is the prevention. Under the degenerate config (CBOW, per-event), within-feature sim reaches 0.999; under the robust config (sg=1, per-account), it is 0.392.
-- **False negatives on spoof:** Mean-pool spoof AUC 0.818 beats the trivial baseline (0.791) but the margin is thin (+0.027). Set operational thresholds conservatively and monitor spoof false negative rate via honeypot accounts or red team events.
+- **False negatives on spoof:** Mean-pool spoof AUC 0.869 beats the trivial baseline (0.750) but the margin is thin (+0.119). Set operational thresholds conservatively and monitor spoof false negative rate via honeypot accounts or red team events.
 - **Cold-start:** Accounts with fewer than 20 confirmed events have unreliable centroids. Fallback: exact set-membership check for accounts below the threshold.
 - **OOV tokens:** Mean-pool handles OOV gracefully — if a feature value is unseen, FastText falls back to character n-gram subword embedding, which degrades gracefully. Concat is more brittle: the full concatenated string is OOV, triggering more complex subword computation.
 
@@ -85,9 +85,9 @@ The robust-config experimental recommendation stands. No ranking inversion under
 - Fallback: exact set-membership (O(1)) for accounts with < 20 events or when embedding service unavailable
 - Monitoring: daily health check on legitimate holdout; OOV rate alert at 5%; T8 collapse check monthly
 
-**Do not deploy:** Any embedding-based spoof detector without first confirming that within-feature collapse has not occurred (T8 check). Both mean-pool and concat fail to beat the trivial baseline on spoof under the current data model when embeddings are degenerate; mean-pool beats it by +0.027 under the robust config.
+**Do not deploy:** Any embedding-based spoof detector without first confirming that within-feature collapse has not occurred (T8 check). Both mean-pool and concat fail to beat the trivial baseline on spoof under the current data model when embeddings are degenerate; mean-pool beats it by +0.119 under the robust config.
 
-**Spoof detection gap:** Mean-pool spoof AUC 0.818 exceeds the trivial baseline but by a narrow margin. Spoof detection requires per-feature-dimension anomaly detection (H3) for reliable production performance.
+**Spoof detection gap:** Mean-pool spoof AUC 0.869 exceeds the trivial baseline but by a narrow margin. Spoof detection requires per-feature-dimension anomaly detection (H3) for reliable production performance.
 
 ---
 
@@ -97,4 +97,4 @@ The robust-config experimental recommendation stands. No ranking inversion under
 2. **T8 monitoring threshold:** Is within-feature sim < 0.9 the right threshold? Testing with varying degrees of intentional config degradation would calibrate this.
 3. **Account history depth:** How many historical events should contribute to the centroid? Recency-weighted centroid vs flat mean is untested.
 4. **Multi-device accounts:** Users with 4+ active devices have higher centroid spread. Personalized thresholds may be needed.
-5. **Adaptive attackers:** If an attacker learns the scoring system, they can sample the victim's primary timezone. Mean-pool's +0.027 advantage over the trivial baseline is the operational gap available to defend.
+5. **Adaptive attackers:** If an attacker learns the scoring system, they can sample the victim's primary timezone. Mean-pool's +0.119 advantage over the trivial baseline is the operational gap available to defend.

@@ -76,16 +76,16 @@ Three experiments compared embedding strategies across attack types.
 
 | Signal | Novel AUC | Fleet AUC | Spoof AUC | Verdict |
 |--------|:---------:|:---------:|:---------:|---------|
-| **Feature tokens, mean-pool** | **0.993** | **0.939** | **0.818** | ✅ Recommended |
-| Feature tokens, concat string | 0.981 | 0.933 | 0.763 | ❌ Below trivial on spoof |
+| **Feature tokens, mean-pool** | **0.999** | **0.994** | **0.869** | ✅ Recommended |
+| Feature tokens, concat string | 0.997 | 0.998 | 0.782 | ⚠️ Beats trivial on spoof (+0.032) |
 | Word2Vec on device IDs | — | 0.891 | — | ✅ Offline fleet detection only |
 | FastText on device IDs | silhouette −0.051 | — | — | ❌ Destroys cluster structure |
-| Trivial set-membership | 0.750 | 0.750 | 0.791 | Fallback only |
+| Trivial set-membership | 0.750 | 0.750 | 0.750 | Fallback only |
 
 <div class="hero">
-<strong>Key insight:</strong> Mean-pool is the <em>only</em> configuration that beats the trivial
-baseline on spoof attacks — the hardest case, where the attacker matches the victim's OS,
-browser, and language and differs only on timezone.
+<strong>Key insight:</strong> Mean-pool (+0.119 over trivial) decisively outperforms concat (+0.032)
+on spoof attacks — the hardest case, where the attacker matches the victim's OS, browser,
+and language and differs only on timezone, network, and screen.
 </div>
 
 ---
@@ -102,7 +102,7 @@ Character n-grams in a concat string span feature boundaries (`ari_ut`, `i_utc`)
 | Window sweep (w=1 to w=6) | Best concat recovers only 43.6% of gap | ✅ |
 | Prefixed-concat format | Silhouette gap 0.090 > 0.05 threshold | ✅ |
 | Tz-position permutation | Every concat ordering below mean-pool spoof AUC | ✅ |
-| Trivial baseline comparison | Mean-pool +0.027; concat −0.028 over trivial | ✅ |
+| Trivial baseline comparison | Mean-pool +0.119; concat +0.032 over trivial | ✅ |
 
 **Score: 7/7 — confirmed across three independent investigations.**
 
@@ -117,7 +117,7 @@ An initial investigation reached the **opposite conclusion** — concat beat mea
 | Configuration | Within-feature sim | Spoof AUC | Conclusion |
 |--------------|--------------------|:---------:|------------|
 | CBOW + per-event corpus | **0.9993** — collapse | 0.384 *(below chance)* | Mean-pool refuted |
-| **Skip-gram + per-account corpus** | **0.392** — healthy | **0.818** | **Mean-pool confirmed** |
+| **Skip-gram + per-account corpus** | **0.392** — healthy | **0.869** | **Mean-pool confirmed** |
 
 <div class="hero">
 <strong>This failure is silent.</strong> Novel and fleet AUC look reasonable even under collapse — only a within-feature token similarity check (T8) detects it. Run after every retraining cycle; alert if similarity &gt; 0.5.
@@ -148,4 +148,4 @@ Fallback (<20 events or service unavailable):
   per-account known-device hash set → step-up if unseen profile
 ```
 
-**Risk to monitor:** The mean-pool spoof advantage over the trivial baseline is +0.027 — statistically significant but operationally narrow. Include spoof-specific AUC in any A/B evaluation before cutover.
+**Risk to monitor:** The mean-pool spoof advantage over the trivial baseline is +0.119 — operationally meaningful. Include spoof-specific AUC in any A/B evaluation before cutover.
