@@ -53,14 +53,14 @@ style: |
 
 &nbsp;
 
-**Answer:** Yes — with the right signal and training configuration.
+**Answer:** Yes — with the right signal, metric, and training configuration.
 
-> FastText on structured feature tokens achieves **AUC 0.985** on novel attacks
-> at sub-millisecond inference latency.
+> FastText mean-pool on structured feature tokens achieves **PR-AUC 0.892** / **ROC-AUC 0.995**
+> on k=1 country-change spoofs at a realistic **1:100** attack-to-benign ratio.
 
 &nbsp;
 
-Three experiments · Adversarial critique & debate · Peer review · Production analysis
+Three experiments · RBA-calibrated replication · Adversarial critique & debate · Production analysis
 
 &nbsp;
 
@@ -70,82 +70,89 @@ Three experiments · Adversarial critique & debate · Peer review · Production 
 
 <!-- Slide 2 -->
 
-# Which Signal Works?
+# Which Signal Works? (H6: RBA-Calibrated, 1:100 Imbalance)
 
-Three experiments compared embedding strategies across attack types.
+Scorers evaluated on k=1 country-change spoof at realistic attack-to-benign ratio.
 
-| Signal | Novel AUC | Fleet AUC | Spoof AUC | Verdict |
-|--------|:---------:|:---------:|:---------:|---------|
-| **Feature tokens, mean-pool** | **0.999** | **0.994** | **0.869** | ✅ Recommended |
-| Feature tokens, concat string | 0.997 | 0.998 | 0.782 | ⚠️ Beats trivial on spoof (+0.032) |
-| Word2Vec on device IDs | — | 0.891 | — | ✅ Offline fleet detection only |
-| FastText on device IDs | silhouette −0.051 | — | — | ❌ Destroys cluster structure |
-| Trivial set-membership | 0.750 | 0.750 | 0.750 | Fallback only |
+| Scorer | ROC-AUC | **PR-AUC** | Top-1% prec | Verdict |
+|--------|:-------:|:----------:|:-----------:|---------|
+| **mp_raw** (mean-pool, raw cosine) | **0.995** | **0.892** | **0.823** | ✅ Recommended |
+| two_stage (gate + mp_raw) | 0.980 | 0.890 | 0.834 | Confirms H6 hypothesis; retired for production |
+| mp_rank_norm | 0.972 | 0.215 | 0.278 | ❌ Collapses under imbalance |
+| Trivial set-membership | 0.943 | 0.104 | 0.119 | Baseline — misleadingly high ROC |
 
 <div class="hero">
-<strong>Key insight:</strong> Mean-pool (+0.119 over trivial) decisively outperforms concat (+0.032)
-on spoof attacks — the hardest case, where the attacker matches the victim's OS, browser,
-and language and differs only on timezone, network, and screen.
+<strong>Key insight:</strong> At 1:100 imbalance, ROC-AUC looks close (trivial 0.943 vs mp_raw 0.995).
+PR-AUC exposes the real gap — <strong>8.6× lift</strong> (0.892 vs 0.104). PR-AUC is the operative metric.
 </div>
 
 ---
 
 <!-- Slide 3 -->
 
-# Why Mean-Pool Beats Concatenated Strings
+# Metric Hierarchy Under Realistic Imbalance
 
-Character n-grams in a concat string span feature boundaries (`ari_ut`, `i_utc`), injecting spurious signal that dilutes any single mismatched feature. Mean-pooling embeds each feature independently — a differing timezone contributes its full weight to the score.
+At 1:100 attack-to-benign ratio, **ROC-AUC is not the decision-relevant metric**.
 
-| Test | Result | Verdict |
-|------|--------|:-------:|
-| Bootstrap CIs on all 4 deltas | All exclude zero | ✅ |
-| Window sweep (w=1 to w=6) | Best concat recovers only 43.6% of gap | ✅ |
-| Prefixed-concat format | Silhouette gap 0.090 > 0.05 threshold | ✅ |
-| Tz-position permutation | Every concat ordering below mean-pool spoof AUC | ✅ |
-| Trivial baseline comparison | Mean-pool +0.119; concat +0.032 over trivial | ✅ |
+| Scorer | ROC-AUC | PR-AUC | Reading |
+|--------|:-------:|:------:|---------|
+| Trivial set-membership | 0.943 | 0.104 | ROC inflates because enrollment negatives are novel too |
+| mp_rank_norm | 0.972 | 0.215 | CDF transform compresses score margin |
+| **mp_raw** | **0.995** | **0.892** | Raw cosine preserves the margin positives need |
 
-**Score: 7/7 — confirmed across three independent investigations.**
+<div class="hero">
+<strong>Why ROC misleads here:</strong> RBA chain-sampling makes enrollment negatives largely novel,
+so trivial scores them 1.0 alongside spoofs — partially correct, inflating ROC past 0.94.
+PR-AUC correctly penalizes the false positive mass.
+</div>
+
+**k=1 resolution:** H5 failed at k=1 (ROC 0.530, 30-token vocabulary). H6 succeeds (ROC 0.995, PR 0.892, 229-token RBA-calibrated vocabulary). k=1 failure was vocabulary poverty — not a fundamental limit of mean-pool embeddings.
 
 ---
 
 <!-- Slide 4 -->
 
-# ⚠️ Critical Finding: Training Configuration Matters
+# ⚠️ Two Silent Failure Modes: Config Collapse & Rank-Norm
 
-An initial investigation reached the **opposite conclusion** — concat beat mean-pool on every metric. Root cause: a degenerate training configuration causes silent within-feature embedding collapse. All timezone values converge to near-identical vectors (sim = 0.9993), eliminating the signal mean-pool depends on.
+**(1) Training config collapse:** CBOW + per-event corpus converges all timezone vectors to sim=0.9993, destroying spoof signal. Novel/fleet AUC look fine. Only a within-feature similarity check catches it.
 
-| Configuration | Within-feature sim | Spoof AUC | Conclusion |
-|--------------|--------------------|:---------:|------------|
-| CBOW + per-event corpus | **0.9993** — collapse | 0.384 *(below chance)* | Mean-pool refuted |
-| **Skip-gram + per-account corpus** | **0.392** — healthy | **0.869** | **Mean-pool confirmed** |
+| Configuration | Within-feature sim | Spoof signal |
+|--------------|:------------------:|:------------:|
+| CBOW + per-event corpus | **0.9993** — collapse | Destroyed |
+| **Skip-gram + per-account corpus** | **0.392** — healthy | **PR-AUC 0.892** |
+
+**(2) Rank-normalization collapses PR-AUC under imbalance:** Previously recommended for cross-account calibration. At 1:100, it drops PR-AUC **0.892 → 0.215** while preserving ROC-AUC — exactly the metric that misleads.
 
 <div class="hero">
-<strong>This failure is silent.</strong> Novel and fleet AUC look reasonable even under collapse — only a within-feature token similarity check (T8) detects it. Run after every retraining cycle; alert if similarity &gt; 0.5.
+<strong>Do not use rank-norm in production scoring.</strong> It is only appropriate for balanced evaluation.
+Keep the within-feature similarity health check — alert if any feature's mean intra-class sim &gt; 0.5.
 </div>
 
 ---
 
 <!-- Slide 5 -->
 
-# Recommended Production Architecture
+# Recommended Production Architecture (Two-Layer Composite)
 
 ```
-At login (<1ms):
-  tokens     = [os_X, br_X, tz_X, lang_X, net_X, sc_X]
-  embedding  = mean(fasttext[t] for t in tokens)
+Layer 1 — System-level blocklist (upstream, before model):
+  Cross-account deny-list of confirmed fleet device keys
+  Populated from customer complaints (lag ~10d from first attack)
+  Precision = 1.0 by construction; covers ~61% of fleet attacks
+
+Layer 2 — Single-stage mp_raw (no per-account gate):
+  embedding  = mean(fasttext[t] for t in feature_tokens)
   risk_score = cosine_distance(embedding, account_centroid)
   → step-up auth if risk_score > threshold
+  Handles: spoof k=1/2/3, novel device, cold-start fleet (PR=0.948)
 
-Monthly retraining:
-  corpus: one sentence per account (all login events concatenated)
-  FastText: sg=1, epochs=20, negative=10, window=6, vector_size=64
-  ✓ Health check: within-feature cosine sim — halt deployment if > 0.5
-
-Offline (daily/weekly):
-  device_id_history → Word2Vec centroid → fleet/reuse review queue
-
-Fallback (<20 events or service unavailable):
-  per-account known-device hash set → step-up if unseen profile
+Retraining (monthly):
+  FastText: sg=1, per-account corpus, window=6, vector_size=64
+  Health check: within-feature sim < 0.5 → halt if fails
 ```
 
-**Risk to monitor:** The mean-pool spoof advantage over the trivial baseline is +0.119 — operationally meaningful. Include spoof-specific AUC in any A/B evaluation before cutover.
+<div class="hero">
+<strong>REMOVED:</strong> per-account known-device gate (fallback) — blinds model during cold-start fleet window.
+<strong>REMOVED:</strong> rank-normalization — collapses PR-AUC (0.892 → 0.215) under realistic imbalance.
+<strong>REMOVED:</strong> Word2Vec offline fleet batch — system-level blocklist handles post-lag fleet with certainty; mp_raw handles the pre-lag residual.
+</div>

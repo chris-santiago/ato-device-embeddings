@@ -1,7 +1,14 @@
 # How to Embed Device Identity for ATO Detection: Key Findings
 
-> Talking points for colleagues. Based on two phases of investigation across five experiments
-> comparing embedding strategies for Account Takeover (ATO) anomaly detection.
+> Talking points for colleagues. Based on multiple phases of investigation — from initial PoC
+> through H2 (robust config), H2-RBA (real-world replication), H5 (stress test), and H6
+> (RBA-calibrated hybrid with realistic imbalance and temporal fleet blocklist).
+
+**TL;DR (post-H6):** Single-stage mean-pool FastText cosine distance (`mp_raw`), fronted by a
+system-level blocklist, is the recommended architecture. The two-stage per-account set-membership
+gate that earlier experiments recommended has been retired — it blinds the model during the
+cold-start fleet window. Rank-normalization, also previously recommended, catastrophically
+degrades PR-AUC under realistic 1:100 class imbalance and should not be used operationally.
 
 ---
 
@@ -91,8 +98,8 @@ performance. This is a structural property of the concatenation, not a positiona
 
 | Attack Type   | AUC             | Notes                              |
 |---------------|-----------------|-------------------------------------|
-| Novel         | 0.993           | Strong                              |
-| Fleet/reuse   | 0.939           | Strong                              |
+| Novel         | 0.999           | Strong                              |
+| Fleet/reuse   | 0.994           | Strong                              |
 | Spoof         | 0.869           | Beats trivial baseline (0.750) ✓ (+0.119) |
 
 **Why it works:**
@@ -130,9 +137,11 @@ This is most valuable when the raw cosine signal is weak — exactly the case fo
 | k=2 — Datacenter VPN | tz + network | Moderate, two fields | 0.689 | **0.735** | 0.750 |
 | k=3 — Emulated device | tz + net + screen | Detectable, three fields | **0.869** | 0.784 | 0.750 |
 
-**The crossover:** Rank normalization wins at k=1 and k=2 (sophisticated attackers with small raw signal). Raw scoring wins at k=3 (three mismatched features produce a large enough raw distance that normalization adds nothing). Both methods remain above the trivial baseline at k=3.
+**The crossover (H2 balanced evaluation):** Rank normalization wins at k=1 and k=2 (sophisticated attackers with small raw signal). Raw scoring wins at k=3.
 
-**The takeaway:** Apply rank normalization by default. The hardest attack type — a single-field mismatch from a VPN — is exactly where raw scoring fails and rank normalization recovers. The cost is 20 calibration events per account; the benefit is AUC gains of +0.192 for the most sophisticated attack profile.
+**The H6 reversal under realistic imbalance.** On the RBA-calibrated hybrid dataset with a 1:100 attack-to-benign ratio, rank-normalization collapses PR-AUC rather than helping. At k=1, `mp_rank_norm` scores PR-AUC 0.215 against `mp_raw` at PR-AUC 0.892 — a 4× degradation. The CDF transform compresses the score margin between positives and negatives, and at 1:100 imbalance that compression is catastrophic. ROC-AUC hides this: rank-norm ROC-AUC (0.972) looks competitive with raw (0.995), but the PR curve degrades sharply.
+
+**The revised takeaway:** Do not use rank-normalization operationally. The earlier k=1 weakness that motivated rank-norm was largely a vocabulary-poverty artifact (30-token toy synthetic). With an RBA-calibrated 229-token vocabulary, raw `mp_raw` at k=1 reaches ROC-AUC 0.995 / PR-AUC 0.892 without any normalization. Raw cosine distance is the production scorer.
 
 ---
 
@@ -161,13 +170,16 @@ gradients during training.
 **The required health check after every retraining:**
 
 ```python
-for dim in ['os', 'browser', 'tz', 'lang', 'net', 'screen']:
+# Production vocabulary (H6: country/region/ASN model):
+for dim in ['os', 'browser', 'country', 'region', 'asn', 'dev']:
     all_vectors = [model.wv[f"{dim}_{val}"] for val in known_values[dim]]
     sim = mean_pairwise_cosine_similarity(all_vectors)
     assert sim < 0.5, f"Embedding collapse in {dim}: similarity={sim:.4f}"
 ```
 
 If any dimension exceeds 0.5, halt deployment. This check catches the failure mode before it ships.
+
+**Open-vocabulary note:** On real RBA data the raw within-feature similarity can exceed 0.5 (observed 0.563) without indicating collapse — open vocabularies have more synonym-like tokens. Monitor the within/cross-feature ratio (target > 1.0) rather than the absolute threshold when deploying against production open-vocab features.
 
 ---
 
@@ -185,30 +197,52 @@ configuration suggest the mean-pool approach *doesn't* work.
 
 ---
 
-## Recommended Production Architecture
+## Recommended Production Architecture (Post-H6)
 
-> **Note:** The architecture below is based on synthetic-data findings (see Results above).
-> Real-world directional support exists (RBA dataset replication, exploratory) but the
-> deployment recommendation is not yet backed by a statistically definitive real-world study.
+> **Note:** The architecture below is grounded in the H6 hybrid experiment (RBA-calibrated
+> marginals, 1:100 attack-to-benign ratio, temporal cross-account blocklist model). See
+> `h6_hybrid/docs/REPORT.md` for full results.
 
+Two decoupled layers, each evaluated on the population it actually serves:
 
-### Real-time scoring (novel + spoof attacks)
-- **Signal:** Mean-pool FastText on feature tokens
-- **Latency:** Single forward pass, ~30ms
-- **Update cadence:** Retrain account centroids monthly
-- **Pre-flight check:** T8 within-feature similarity assertion after every retrain
+### Layer 1 — System-level blocklist (upstream)
+- **Signal:** Cross-account deny-list of confirmed fleet/abuse device keys.
+- **Population:** Post-lag fleet accounts — in H6's model (10-day lag, 30-day attack window),
+  this is 61% of fleet-attacked accounts.
+- **Precision:** 1.0 by construction (only confirmed device keys are listed).
+- **At login:** If device key is in blocklist → deny / hard decision. Event never reaches Layer 2.
+- **Population source:** Customer complaints, downstream triage, threat intelligence feeds,
+  optionally accelerated by Layer 2 detections flagged for review.
 
-### Offline batch scoring (fleet/reuse attacks)
-- **Signal:** Word2Vec on per-account device ID sequences with cross-account fleet injection
-- **Why offline:** Device ID embeddings are rotationally variant across retraining runs — not stable
-  for real-time centroid comparison across model versions
-- **Cadence:** Weekly batch job, outputs a review queue for manual or downstream triage
+### Layer 2 — Real-time mean-pool scoring (single-stage, no gate)
+- **Signal:** Mean-pool FastText cosine distance to account centroid (`mp_raw`).
+- **No per-account set-membership gate.** The two-stage gate (known device → score=0) blinds
+  the model during the cold-start fleet window: the fleet device appears in the account's
+  training set (it was a normal login before the attack), so the gate scores it 0 precisely
+  when the blocklist has not yet activated.
+- **No rank-normalization.** Collapses PR-AUC from 0.892 → 0.215 under 1:100 imbalance (H6).
+- **Population:** All events that clear Layer 1 — includes spoof (k=1/2/3), novel devices,
+  and cold-start fleet events.
+- **H6 performance on this population:**
+  - Spoof k=1 (hardest, country-change only): PR-AUC 0.892, top-1% precision 82.3%
+  - Novel device: PR-AUC 0.965, top-1% precision 92.0%
+  - Fleet residual (pre-lag cold-start only): PR-AUC 0.948, top-1% precision 91.8%
+- **Latency:** Single forward pass, sub-millisecond.
+- **Update cadence:** Retrain account centroids monthly; retrain FastText monthly.
+- **Pre-flight check:** T8 within-feature similarity assertion after every retrain.
 
-### Operational gate (all devices)
-- **Signal:** Per-account confirmed-device set (Redis/DynamoDB hash)
-- **Purpose:** Fast-path skip for returning known-good devices; triggers step-up auth for any
-  unknown device regardless of embedding score
-- **Not for scoring:** Do not use presence/absence as the risk score — this is the OOV trap
+### Offline support (feeds Layer 1)
+- **Signal:** Word2Vec on per-account device ID sequences with cross-account fleet injection.
+- **Why offline:** Device ID embeddings are rotationally variant across retraining runs — not
+  stable for real-time centroid comparison across model versions.
+- **Cadence:** Weekly batch job, outputs a review queue that can accelerate blocklist
+  population.
+
+### What was removed from prior recommendations
+- **Two-stage per-account gate:** Retired. Blinds the model during cold-start fleet attacks.
+  H6 fleet-residual evaluation: trivial/two-stage score 0 TP on the cold-start population;
+  `mp_raw` scores 180 TP at 91.8% precision on the same events.
+- **Rank-normalization:** Retired. Catastrophically degrades PR-AUC under realistic imbalance.
 
 ---
 
@@ -243,12 +277,48 @@ than the absolute threshold.
 
 ---
 
+## H6 Summary: Class Imbalance, Vocabulary Depth, and Fleet Architecture
+
+H6 replaced the closed 30-token synthetic vocabulary with an RBA-calibrated 229-token
+vocabulary generated by chain-sampling real login marginals (11.7M clean RBA logins). It also
+replaced the 1:1 attack/benign evaluation with a realistic 1:100 enrollment ratio and added a
+temporal cross-account blocklist model (10-day lag from first attack to activation). Four
+conclusions emerged that revise the earlier architecture guidance:
+
+1. **k=1 country-change spoofing is detectable.** Prior H5 reported k=1 mean-pool ROC-AUC 0.530
+   vs. trivial 0.750 on 30-token synthetic and raised the possibility that k=1 was a fundamental
+   limit. H6 disproves this: with 229-token RBA-calibrated vocabulary, k=1 `mp_raw` reaches
+   ROC-AUC 0.995 / PR-AUC 0.892 — an 8.6× PR-AUC lift over trivial. The earlier failure was
+   vocabulary poverty, not an architectural ceiling.
+
+2. **PR-AUC is the only honest metric under class imbalance.** At 1:100, trivial ROC-AUC is 0.943
+   while trivial PR-AUC is 0.104 — ROC compresses into an uninformative band where all models
+   appear competitive. PR-AUC correctly surfaces the 8.6× gap between `mp_raw` (0.892) and
+   trivial (0.104). Report PR-AUC and top-k precision/recall for any imbalanced deployment
+   evaluation.
+
+3. **Rank-normalization is harmful under imbalance.** PR-AUC drops from 0.892 to 0.215 at k=1.
+   The CDF transform compresses score margins, and compression is catastrophic at 1:100. Do not
+   use rank-norm in operational scoring.
+
+4. **Fleet detection is a two-layer composite, not a single scorer.** A realistic fleet attack
+   has two populations: post-lag events (blocklist can catch with precision=1.0) and pre-lag
+   cold-start events (blocklist cannot see; model must handle). The per-account set-membership
+   gate (previously recommended as "two-stage") scores the fleet device as `known → 0` during
+   cold-start — exactly when the model is the only available defense. Retire the gate. Use
+   system-level blocklist + single-stage `mp_raw`. On the fleet-residual population (pre-lag
+   only), `mp_raw` scores PR-AUC 0.948 / 91.8% precision; trivial and two-stage score 0 TP.
+
+---
+
 ## Bottom Line
 
 The key insight is that **you should not embed what you want to identify; you should embed the
 semantic attributes that describe it.** Opaque device IDs are the wrong unit of embedding because
 new devices are always OOV. Structured feature tokens are never OOV — they form a bounded
-vocabulary (~30 tokens total) that generalizes naturally to new devices through shared features.
+vocabulary that generalizes naturally to new devices through shared features. (In H6, that
+vocabulary is 229 tokens drawn from real RBA marginals, not the original 30-token toy
+vocabulary — richness here directly determines whether k=1 spoofs are detectable.)
 
 Mean-pooling the feature token embeddings rather than concatenating them into a single string
 preserves each feature's independent signal and avoids cross-boundary contamination — a subtle
@@ -258,3 +328,8 @@ attack type.
 The training configuration is not a tuning knob; it determines whether the embedding space
 collapses silently. Skip-gram + per-account corpus is the only configuration that produces genuine
 feature differentiation. Validate it with the T8 health check on every retrain cycle.
+
+Finally, resist the temptation to add per-account gates or rank-normalization on top of
+`mp_raw`. Both were supported by earlier balanced evaluations but degrade PR-AUC under realistic
+class imbalance. Keep the model simple, front it with a system-level blocklist, and measure
+with PR-AUC.
