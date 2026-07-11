@@ -1,0 +1,162 @@
+{
+  "schema_version": 1,
+  "script": "h6_perevent_collapse.py",
+  "plan": "plan/12-CRITIQUE_ABLATIONS.md",
+  "seed": 123,
+  "smoke": false,
+  "timestamp_utc": "2026-07-11T20:22:36.254414+00:00",
+  "n_accounts": 400,
+  "config": {
+    "min_token_count": 5,
+    "collapse_threshold": 0.9,
+    "window": 6,
+    "conditioned_features": [
+      "region",
+      "asn_bucket",
+      "browser",
+      "device_type"
+    ]
+  },
+  "token_totals": {
+    "os": {
+      "total": 12,
+      "filtered": 8
+    },
+    "browser": {
+      "total": 16,
+      "filtered": 12
+    },
+    "device_type": {
+      "total": 4,
+      "filtered": 4
+    },
+    "country": {
+      "total": 38,
+      "filtered": 21
+    },
+    "region": {
+      "total": 95,
+      "filtered": 46
+    },
+    "asn_bucket": {
+      "total": 78,
+      "filtered": 48
+    },
+    "rtt_bucket": {
+      "total": 5,
+      "filtered": 5
+    }
+  },
+  "jsd": {
+    "per_event": {
+      "os": 0.421891238140422,
+      "browser": 0.4345156381854963,
+      "device_type": 0.4234926684460179,
+      "country": 0.5118293557999961,
+      "region": 0.5258423866339302,
+      "asn_bucket": 0.49254513152053725,
+      "rtt_bucket": 0.26153679865475665
+    },
+    "per_account": {
+      "os": 0.34400937949964094,
+      "browser": 0.372272990726556,
+      "device_type": 0.3295402574738114,
+      "country": 0.5014342737496562,
+      "region": 0.5092262561689688,
+      "asn_bucket": 0.4721252729005559,
+      "rtt_bucket": 0.25294429088226456
+    }
+  },
+  "cells": {
+    "sg_per_event": {
+      "within_cos_wv": {
+        "os": 0.5514585375785828,
+        "browser": 0.7918436527252197,
+        "device_type": 0.6549794673919678,
+        "country": 0.7580018043518066,
+        "region": 0.7204149961471558,
+        "asn_bucket": 0.815584123134613,
+        "rtt_bucket": 0.9766334295272827
+      },
+      "within_cos_vocab": {
+        "os": 0.07201938331127167,
+        "browser": -0.050359949469566345,
+        "device_type": -0.1997816115617752,
+        "country": -0.027302483096718788,
+        "region": 0.028056582435965538,
+        "asn_bucket": -0.015945924445986748,
+        "rtt_bucket": 0.03473684936761856
+      },
+      "pooled_within_cos_wv": 0.7676953435112188
+    },
+    "sg_per_account": {
+      "within_cos_wv": {
+        "os": 0.2586781084537506,
+        "browser": 0.49868977069854736,
+        "device_type": 0.41930365562438965,
+        "country": 0.49806666374206543,
+        "region": 0.41905149817466736,
+        "asn_bucket": 0.49523356556892395,
+        "rtt_bucket": 0.8066095113754272
+      },
+      "within_cos_vocab": {
+        "os": -0.07508061826229095,
+        "browser": -0.06425053626298904,
+        "device_type": -0.2905888855457306,
+        "country": -0.0382615365087986,
+        "region": 0.004803739488124847,
+        "asn_bucket": -0.017754750326275826,
+        "rtt_bucket": -0.2063123881816864
+      },
+      "pooled_within_cos_wv": 0.46221271373610606
+    },
+    "cbow_per_event": {
+      "within_cos_wv": {
+        "os": 0.6121816635131836,
+        "browser": 0.8989807963371277,
+        "device_type": 0.7625213265419006,
+        "country": 0.9433279633522034,
+        "region": 0.8259745836257935,
+        "asn_bucket": 0.9733661413192749,
+        "rtt_bucket": 0.9805008172988892
+      },
+      "within_cos_vocab": {
+        "os": 0.18380440771579742,
+        "browser": -0.008500712923705578,
+        "device_type": -0.1561269760131836,
+        "country": 0.061436742544174194,
+        "region": 0.01449553295969963,
+        "asn_bucket": 0.005000164266675711,
+        "rtt_bucket": 0.12740513682365417
+      },
+      "pooled_within_cos_wv": 0.9028568218739353
+    },
+    "cbow_per_account": {
+      "within_cos_wv": {
+        "os": 0.30546966195106506,
+        "browser": 0.5796961188316345,
+        "device_type": 0.4344734847545624,
+        "country": 0.7186424136161804,
+        "region": 0.4225340187549591,
+        "asn_bucket": 0.582595944404602,
+        "rtt_bucket": 0.9356303215026855
+      },
+      "within_cos_vocab": {
+        "os": -0.03881442919373512,
+        "browser": -0.06126699224114418,
+        "device_type": -0.2606378495693207,
+        "country": -0.02803768962621689,
+        "region": 0.004586446564644575,
+        "asn_bucket": -0.01138131134212017,
+        "rtt_bucket": -0.0852217748761177
+      },
+      "pooled_within_cos_wv": 0.5252445073837869
+    }
+  },
+  "verdicts": {
+    "a3p_rtt_max_cosine": true,
+    "a3p_rtt_min_jsd": true,
+    "a3p_conditioned_below_threshold": true,
+    "a3p_collapse_all": false
+  }
+}

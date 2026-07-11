@@ -1,0 +1,35 @@
+{
+  "seed": 456,
+  "timestamp": "2026-04-21T06:08:00.243081+00:00",
+  "split_percentile": 50,
+  "n_ato_test_events": 9,
+  "auc": {
+    "mean_pool": {
+      "roc_auc": 0.8389344507878317,
+      "pr_auc": 0.03341534426578732,
+      "ci_lower": 0.6764004180043538,
+      "ci_upper": 0.9743080224065978
+    },
+    "concat": {
+      "roc_auc": 0.8575084692505591,
+      "pr_auc": 0.03126876776187743,
+      "ci_lower": 0.7538530724639507,
+      "ci_upper": 0.9394408597476153
+    },
+    "trivial": {
+      "roc_auc": 0.652911702541447,
+      "pr_auc": 0.00032799789298827427
+    }
+  },
+  "t6_compactness": {
+    "mean_pool": 0.03593828405963723,
+    "concat": 0.12982711404866132
+  },
+  "t8_token_similarity": {
+    "within_feature_mean": 0.5623033634256787,
+    "cross_feature_mean": 0.3297146013616832,
+    "within_cross_ratio": 1.7054245129073167,
+    "collapse_detected": false
+  },
+  "h2_replicated": true
+}

@@ -1,260 +1,208 @@
-# ATO Detection via Device Embeddings
+# Is FastText the Right Way to Embed Device Attributes for ATO Detection?
 
-FastText trained on structured login feature tokens (OS, browser, country, region, ASN,
-device type) detects account takeover in real time. At realistic 1:100 attack-to-benign
-imbalance, single-stage mean-pool cosine distance (`mp_raw`) achieves PR-AUC 0.892 on
-the hardest attack type — a VPN-style single-field country change — an 8.6x lift over
-the trivial set-membership baseline (PR-AUC 0.104). The model scores each login in under
-a millisecond and requires no per-account gate or score normalization.
+This repository asks one question and answers it with pre-specified, seeded,
+controlled experiments: **is a FastText embedding over login device attributes
+an appropriate anomaly signal for account-takeover detection? If so, how, when,
+and why. If not, what wins.**
 
-**Final recommendation: system-level blocklist + single-stage `mp_raw`. No per-account
-gate. No rank-normalization.** An earlier two-stage gate architecture and a
-rank-normalization variant were both retired after H6 showed they degrade PR-AUC
-catastrophically under realistic class imbalance.
-
----
-
-## Recommended architecture
-
-Two decoupled layers, each evaluated on the population it actually serves:
-
-```
-Layer 1 — System-level blocklist (upstream deny-list):
-  Input:  confirmed fleet/abuse device keys (customer complaints,
-          downstream triage, threat intel).
-  Action: if device_key in blocklist → deny. Event never reaches Layer 2.
-  Coverage: post-lag fleet accounts (~61% of fleet attacks in H6).
-  Precision: 1.0 by construction.
-
-Layer 2 — Single-stage mp_raw scorer (no gate, no rank-norm):
-  tokens     = [f"os_{os}", f"br_{browser}", f"country_{country}",
-                f"region_{region}", f"asn_{asn_bucket}", f"dev_{device_type}"]
-  embedding  = mean([fasttext_model[t] for t in tokens])
-  risk_score = cosine_distance(embedding, account_centroid)
-  → step-up auth if risk_score > threshold
-  Coverage: all events that clear the blocklist (spoof, novel device,
-            cold-start fleet).
-  H6 performance: spoof k=1 PR=0.892; novel PR=0.965; fleet residual PR=0.948.
-
-Monthly retraining:
-  corpus: one sentence per account (all login events concatenated)
-  FastText: sg=1, epochs=20, negative=10, min_n=3, max_n=6, window=6, vector_size=64
-  Health check: compute within-feature cosine similarity → halt deployment if > 0.5
-                (indicates embedding collapse; see "Critical configuration warning" below)
-
-Offline (daily/weekly):
-  device_id_history → Word2Vec centroid distance → fleet/reuse review queue
-  (feeds Layer 1 blocklist population)
-
-Fallback (< 20 confirmed events per account, or embedding service down):
-  per-account known-device hash set → step-up auth if unseen profile
-```
-
-**Do not use:** per-account set-membership gate (two-stage) or rank-normalization.
-Both degrade PR-AUC catastrophically under 1:100 imbalance. The two-stage gate also
-blinds the model during the cold-start fleet window — the exact period when it is
-the only available defense. See the narrative below for the mechanism.
+The short answer: **not as usually proposed, and never below a vocabulary-size
+threshold.** The value in the architecture comes from per-feature tokenization,
+per-account corpus construction, and centroid cosine scoring. It does not come
+from FastText's distinguishing feature: character n-gram subwords measurably
+hurt in-vocabulary discrimination and are justified only as a priced trade-off
+for out-of-vocabulary drift. On small vocabularies a smoothed counting baseline
+beats every embedding configuration tested; on realistic open vocabularies at
+1:100 imbalance, plain token embeddings earn their place. Every number below is
+a 5-seed mean ± std from the reproducibility record in `experiments/rerun/`.
 
 ---
 
-## Results
+## When an embedding is justified at all
 
-PR-AUC is the operative metric at 1:100 attack-to-benign imbalance. ROC-AUC
-compresses into a narrow band at this ratio where all scorers appear competitive
-(trivial ROC=0.943, mp_raw ROC=0.995); only PR-AUC surfaces the 8.6x operational
-gap between them.
+The decision is a memorization-to-generalization crossover, measured at two
+points:
 
-| Scorer | Spoof k=1 PR-AUC | Novel PR-AUC | Fleet residual PR-AUC |
-|--------|:----------------:|:------------:|:---------------------:|
-| **`mp_raw` (recommended)** | **0.892** | **0.965** | **0.948** |
-| Two-stage (gate + mp_raw) | 0.890 | 0.940 | 0.010 — blind in cold-start |
-| Rank-norm (`mp_rank_norm`) | 0.215 | 0.273 | 0.229 |
-| Trivial set-membership | 0.104 | 0.103 | 0.010 |
+| Vocabulary regime | Winner | Spoof detection |
+|---|---|---|
+| Closed, ~30 tokens | Per-feature likelihood (counting) | likelihood 0.895 ± 0.006 ROC vs embedding 0.868 ± 0.012 |
+| Open, 216–240 tokens, 1:100 imbalance | Plain token embedding | embedding 0.888 ± 0.026 PR vs likelihood 0.766 ± 0.011 |
 
-All numbers from H6 (RBA-calibrated hybrid dataset, 1:100 imbalance, 229-token
-vocabulary). Bootstrap 95% CIs for mp_raw: spoof k=1 [0.880, 0.903], novel
-[0.959, 0.971].
+While per-account value counts are dense, counting wins: thirty familiar tokens
+are a lookup problem, and a distributed representation adds nothing. When the
+vocabulary grows and counts thin out, the embedding's cross-feature structure
+becomes the signal, and the gap is decisive on PR-AUC (invisible on ROC-AUC,
+0.995 vs 0.992, which is itself a lesson about metrics at 1:100). The crossover
+lies somewhere between these two points; benchmark both on your own vocabulary
+before choosing.
 
-**Column notes.** Spoof k=1 = attacker changes country only (VPN-realistic, the
-hardest case). Novel = fully new device tuple unseen in training. Fleet residual =
-pre-lag cold-start accounts only — the 39 accounts where the blocklist had not yet
-activated and `mp_raw` is the only defense; two-stage scores these as `known → 0`,
-producing 0 true positives.
+**What wins otherwise.** The incumbent is a smoothed per-account, per-feature
+categorical likelihood with global backoff:
+`score(event) = −Σ_f log[λ·P̂(v_f | account) + (1−λ)·P̂(v_f | global)]`,
+Laplace-smoothed. It is CPU-cheap, label-free, needs no training loop, and
+detects training-contaminated attacker devices about as well as the embedding
+does (top-1% precision 0.53 vs 0.49). Any embedding proposal in this tier that
+does not report this baseline is unfinished.
 
-**Real-world replication (RBA dataset).** Applying the same pipeline to the DAS Group
-RBA dataset (~31M real SSO logins, 141 ATO events) produces mean-pool ROC-AUC 0.852
-[0.689, 0.975] vs. trivial 0.661. The mean-pool > trivial ordering holds across all
-three tested temporal splits. Result is exploratory (n=9 test positives) but
-directionally consistent. See `h2_rba/docs/REPORT.md` and `TECHNICAL_REPORT.md` §6.
+---
+
+## Refutations
+
+Each row is a tempting claim about this architecture, tested and rejected. The
+rules that survive are the design in the next section.
+
+| # | Tempting claim | Verdict |
+|---|---|---|
+| 1 | Embed the concatenated device string | Structurally broken |
+| 2 | The embedding learns device semantics | Mostly set-overlap geometry |
+| 3 | Subwords add robustness for free | They cost accuracy; the benefit is unmeasured |
+| 4 | Skip-gram is mandatory | The corpus is causal, the objective is not |
+| 5 | Per-event corpora destroy embeddings | True only for weakly-coupled features |
+| 6 | Gate alerts on known devices | Suppresses exactly the attacks that matter, in any scoring family |
+| 7 | Rank-normalize per account | Collapses precision at thin calibration windows |
+| 8 | It beats the baseline | Against the wrong baseline and the wrong metric |
+
+**1 — Concatenated device strings.** Joining attributes into one token
+(`ios_chrome_utc+0_...`) scores 0.737 ± 0.006 spoof ROC, below the trivial
+set-membership baseline (0.750) on every seed: cross-boundary character n-grams
+dilute a single changed field below detectability. The failure is
+representational, not a training artifact. A frozen random vector per device
+string scores at the trivial baseline (0.744), and without subwords the encoder
+cannot score unseen devices at all (93% of spoof events are OOV as whole
+strings) and degenerates to trivial (0.752). Concatenation depends on exactly
+the mechanism that poisons it.
+
+**2 — "It learns device semantics."** Frozen random per-token vectors, no
+training, score 0.836 ± 0.014 spoof ROC: about 73% of the trained encoder's
+advantage over trivial is untrained set-overlap geometry (a changed field moves
+a mean-pooled vector by ~1/6 no matter what training did). Training adds real
+signal, but the as-proposed FastText config beats its own random floor by only
++0.032 ROC. The honest claim is geometry plus learned account co-occurrence,
+nothing stronger.
+
+**3 — Subwords.** Disabling character n-grams (`max_n=0`, plain token
+embeddings, everything else identical) *improves* spoof detection to
+0.887 ± 0.007 ROC / 0.819 ± 0.011 PR. The subword-vs-none delta is negative on
+4/5 seeds and positive on none, because shared feature prefixes (`os_`, `tz_`)
+pull same-feature tokens together and blunt the separation the scorer needs.
+Only the no-subword encoder beats the random floor on all seeds (+0.051 ROC,
++0.111 PR). The OOV robustness subwords are purchased for is not exercised by
+any evaluation here, and in field-tokenized telemetry the field of an unseen
+value is always known, so an explicit per-feature fallback vector is always
+available. Retaining subwords is a deliberate trade: pay ~0.02 ROC / 0.03 PR
+in-vocabulary for surface-form generalization that should matter mainly under
+version-like value drift.
+
+**4 — "Always use skip-gram."** The 2×2 factorial (objective × corpus) shows
+corpus construction is the causal axis of embedding health. Both per-event
+cells collapse on all seeds regardless of objective; both per-account cells are
+healthy regardless of objective, and CBOW + per-account is nominally the
+strongest spoof scorer of the four (0.933 ± 0.009). Per-account corpora are
+mandatory. The training objective is a tuning choice.
+
+**5 — Within-feature collapse.** One-sentence-per-event corpora make all values
+of a feature converge to near-identical vectors (within-feature cosine 0.94 to
+0.98), which silently destroys the hardest attack subtype while novel and fleet
+detection stay high. The mechanism is context-distribution overlap, and it has
+a precondition: the other features must be uninformative about the collapsed
+one. On data with realistic feature coupling (browser|OS, region|country), the
+pooled collapse disappears (0.758 ± 0.011, below threshold on every seed) and
+only the one independently-sampled feature collapses (0.961, the outlier on 5/5
+seeds). Benchmarks that sample features independently overstate this failure
+mode. If you monitor within-feature cosine as a health check, use per-feature
+baselines: shared-prefix n-gram inflation puts healthy features above any
+sensible global threshold.
+
+**6 — The known-device gate.** Suppressing alerts on devices seen in the
+training window produces zero top-1% true positives on accounts whose training
+history contains an attacker device, on every seed, with ROC exactly equal to
+trivial. This is structural: an attacker admitted into the history is by
+definition "known". The trap is binarization, not the scorer. Raw cosine
+detects the contaminated-fleet population at top-1% precision 0.49 ± 0.12, the
+likelihood incumbent at 0.53 ± 0.14, and wrapping *either* in the gate zeroes
+it. Never binarize trust on training-window membership; confirmed-abuse
+blocklists belong upstream of scoring and are orthogonal to it.
+
+**7 — Per-account rank-normalization.** Converting cosine distances to
+per-account percentile ranks collapses spoof PR-AUC from ~0.89 to ~0.22 at the
+20-event calibration windows realistic for new and low-frequency accounts. The
+rank floor is quantized at 1/N_calib, so precision recovers only once windows
+reach hundreds of events (`experiments/rerun/calib_sweep/`). Score with raw
+cosine distance.
+
+**8 — Baselines and metrics.** Exact set-membership is a floor, not an
+incumbent: any proposal must beat the smoothed likelihood scorer (see above) on
+its actual vocabulary regime, and must report PR-AUC at deployment imbalance,
+stratified by attack population. Every failure in this table is invisible to
+aggregate held-out ROC-AUC: the concat failure needs spoof stratification, the
+collapse preserves the easy subtypes, the gate failure lives in a population
+that standard splits average away, and the regime reversal in the first section
+appears only on PR.
+
+---
+
+## The design that survives
+
+```
+tokens      = [f"{feature}_{value}" for each attribute]   # per-feature tokens, never concatenated
+corpus      = one sentence per account (all login events concatenated)
+model       = FastText(vector_size=64, window=6, epochs=20, negative=10,
+                       max_n=0,            # plain token embeddings; see refutation 3 before changing
+                       sg=0 or 1)          # tuning choice; see refutation 4
+event_vec   = mean(token vectors)
+risk_score  = cosine_distance(event_vec, account_centroid)
+
+unseen value  → per-feature fallback vector (field is always known to the tokenizer)
+no known-device gate; no per-account rank-normalization
+health check  → within-feature cosine vs per-feature baselines recorded at first healthy training
+evaluation    → PR-AUC at deployment imbalance, stratified by attack type,
+                vs trivial membership AND the smoothed likelihood incumbent
+```
+
+Deploy this only in the vocabulary regime where it beats the likelihood
+incumbent on your data. Below that regime, deploy the incumbent.
+
+**Replication check.** On the public RBA dataset (real-world feature
+distributions, temporal split), the embedding beats the trivial baseline on all
+seeds (ROC 0.852 ± 0.029 vs 0.679 ± 0.046). With n = 9 labeled ATO test events
+this is a directional check only, stable across split-sensitivity variants but
+not a powered evaluation.
 
 ---
 
 ## Quickstart
 
-Scripts are self-contained with inline dependencies ([PEP 723](https://peps.python.org/pep-0723/)). No virtualenv required.
+Scripts are self-contained with inline dependencies
+([PEP 723](https://peps.python.org/pep-0723/)); run with `uv`, no virtualenv.
 
 ```bash
-# H6: final experiment — RBA-calibrated vocabulary, 1:100 imbalance, temporal blocklist
-uv run h6_hybrid/experiments/data_prep.py         # one-time: extract RBA marginals (~5 min)
-uv run h6_hybrid/experiments/hybrid_experiment.py
+# Full 5-seed reproducibility record (H2 encoder comparison, H6 system-level, RBA replication)
+bash experiments/rerun/run_all.sh
 
-# H2: mean-pool vs. concat head-to-head (the core architectural comparison)
-uv run pre_ml_lab/experiments/h2_rerun_experiment1.py
+# The controls behind the refutations (random floor, likelihood incumbent,
+# no-subword cell, correlated-marginals collapse)
+bash experiments/rerun/ablations/run_ablations.sh
 
-# Real-world replication on the DAS Group RBA dataset
-uv run h2_rba/experiments/data_prep.py            # one-time: downloads ~1 GB, writes parquet
-uv run h2_rba/experiments/rba_rerun.py --smoke    # fast pipeline check (~30 sec)
+# Single pieces
+uv run experiments/rerun/scripts/h2/h2_rerun.py --seed 42     # encoder comparison, one seed
+uv run experiments/rerun/ablations/a4_nosub.py --smoke        # subword ablation, fast check
 ```
 
 ---
 
-## How we got here
+## Where the evidence lives
 
-### The signal that works — and why it isn't obvious
+| Claim | Evidence |
+|---|---|
+| Refutations 1–3 (concat, random floor, subwords) | `experiments/rerun/scripts/h2/`, `experiments/rerun/ablations/` (`baseline_controls.py`, `a4_nosub.py`) |
+| Refutation 4 (factorial) and 5 (collapse + scoping) | `experiments/rerun/scripts/h2/h2_rerun.py`, `experiments/rerun/ablations/h6_perevent_collapse.py` |
+| Refutation 6 (gate, cross-family) | `experiments/rerun/scripts/h6/`, `experiments/rerun/ablations/h6_likelihood_incumbent.py` |
+| Refutation 7 (rank-norm) | `experiments/rerun/calib_sweep/` |
+| Vocabulary-regime comparison | `experiments/rerun/ablations/SUMMARY.md` |
+| Aggregated numbers (5-seed) | `experiments/rerun/aggregate/`, `experiments/rerun/ablations/aggregate/` |
+| RBA replication | `experiments/rerun/scripts/rba/`, `experiments/h2_rba/` |
+| Full synthesis | `TECHNICAL_REPORT.md`, `DEVICE_EMBEDDING_FINDINGS.md` |
+| Original investigations (historical, single-run) | `experiments/pre_ml_lab/`, `experiments/h2_ml_lab/`, `experiments/h3_pfn/`, `experiments/h4_gru/`, `experiments/h5_stress/`, `experiments/h6_hybrid/` |
 
-Early experiments (Experiments 1–2) tested FastText trained on raw opaque device IDs
-(e.g., `device_8472a`). Character n-grams on random hex strings destroy account cluster
-structure — silhouette score −0.051, meaning no per-account separation at all. Raw device
-IDs do not work.
-
-Experiment 3 replaced device IDs with structured feature tokens: `os_ios`,
-`browser_safari`, `country_us`, and so on. FastText's n-gram mechanism now operates on
-meaningful prefixes (`os_`, `browser_`) rather than random characters. Per-account
-clusters form cleanly, and AUC on novel attacks reaches 0.985 under a corrected
-evaluation design (enrollment events — legitimate new devices — included in the negative
-class, so any signal that fires on all unseen devices is penalized).
-
-An apparent 0.989 AUC for a simple out-of-vocabulary binary baseline in Experiment 2 was
-an evaluation artifact: every account had unique device IDs, making attack detection
-equivalent to flagging any globally unseen device. Under the corrected evaluation the
-OOV baseline collapses to 0.750 on novel and spoof attacks and 0.250 on fleet attacks.
-Feature embeddings are immune to this collapse because they measure fit-to-cluster, not
-seen/unseen membership.
-
-### Mean-pool vs. concatenated string (H2)
-
-Once structured feature tokens were established, the question became: embed features as
-one concatenated string (`ios_safari_us_en-us_wifi_small`) or mean-pool six independent
-token embeddings? **Mean-pool wins — 7/7 pre-specified tests.** The mechanism: character
-n-grams in the concatenated string span feature boundaries, injecting spurious signal
-that dilutes the discriminative information in any single differing feature (e.g., a
-changed country). Mean-pooling embeds each feature independently, so a single mismatched
-feature contributes its full signal to the distance score.
-
-This was confirmed three ways across independent investigations, all under the same
-robust training configuration.
-
-### Critical configuration warning
-
-A degenerate training configuration (CBOW objective + per-event corpus) causes
-**within-feature embedding collapse**: all values of a single feature (e.g., every
-country code) converge to nearly identical vectors (cosine similarity 0.9993). Under
-collapse, mean-pool carries no country signal and the concat string appears to win — the
-opposite conclusion. This failure is **silent at the novel and fleet AUC level** and
-visible only via the T8 token similarity diagnostic.
-
-| Configuration | Within-feature similarity | Spoof AUC | Conclusion |
-|--------------|:-------------------------:|:---------:|:----------:|
-| CBOW + per-event corpus (broken) | 0.9993 — collapse | 0.384 (below chance) | Mean-pool appears to fail |
-| Skip-gram + per-account corpus (correct) | 0.392 — healthy | 0.869 | Mean-pool confirmed |
-
-**The skip-gram + per-account corpus configuration is not optional.** Run the T8
-within-feature similarity check after every retraining cycle. If any feature dimension
-shows similarity > 0.5, halt deployment and inspect corpus construction.
-
-### Intermediate experiments (H3–H5)
-
-Three follow-on experiments tested further variants: H3 per-feature normalization (no
-improvement over mp_raw), H4 GRU temporal model (not confirmed at this dataset scale),
-and H5 k=1 spoof stress test on a 30-token synthetic vocabulary (mp_raw scored 0.530,
-below the trivial baseline of 0.750 — a failure since resolved). H6 resolved the H5
-finding by using a 229-token RBA-calibrated vocabulary: with richer co-occurrence
-structure, raw mp_raw at k=1 reaches ROC-AUC 0.995 / PR-AUC 0.892. The k=1 failure was
-vocabulary poverty, not an architectural limit.
-
-### Rank-normalization — retired
-
-Rank-normalization converts raw cosine distances to empirical percentile scores within
-each account's calibration set. On a balanced (1:1) evaluation with the 30-token
-vocabulary, it improved k=1 ROC-AUC from 0.522 to 0.714 — a real gain on the balanced
-metric. Under the operationally realistic 1:100 imbalance studied in H6, the same
-transform collapses PR-AUC from 0.892 to 0.215 — a 4x degradation. The CDF compression
-that helps on balanced data destroys precision at realistic imbalance. The earlier
-recommendation to apply rank-normalization is retired. Use raw cosine distance.
-
-### Two-stage gate — retired
-
-Earlier analysis recommended a per-account set-membership gate: if the device is in the
-account's known-device set, score it 0 (pass through); otherwise score with mp_raw. H6's
-fleet-residual analysis retired this architecture. During the cold-start fleet window —
-the period between the first fleet attack and blocklist activation — the fleet device is
-already in the account's training set as a legitimate prior login. The gate fires
-(`known → 0`) and blinds the model precisely when it is the only available defense.
-After the blocklist activates, events from confirmed fleet devices never reach the model
-at all, making the gate irrelevant on both sides of the lag boundary. The two-layer
-blocklist + mp_raw architecture replaces it: the blocklist catches post-lag fleet
-accounts with certainty (precision=1.0), and mp_raw handles cold-start fleet via the
-continuous cosine-distance signal (fleet residual PR-AUC 0.948).
-
----
-
-## Investigation artifacts
-
-| Directory | Contents |
-|-----------|----------|
-| `pre_ml_lab/` | Experiments 1–3 and original/rerun H2 investigation |
-| `h2_ml_lab/` | Structured H2 investigation with adversarial critique and peer review |
-| `h2_rba/` | Real-world replication on the DAS Group RBA dataset (~31M logins) |
-| `h3_pfn/` | H3: per-feature normalized scoring — not confirmed |
-| `h4_gru/` | H4: GRU temporal model vs. mean-pool — not confirmed at this dataset scale |
-| `h5_stress/` | H5: k=1 stress test on 30-token vocabulary — failure resolved by H6 |
-| `h6_hybrid/` | H6: RBA-calibrated vocabulary, 1:100 imbalance, temporal fleet blocklist — final recommendation |
-| `TECHNICAL_REPORT.md` | Full synthesis: H2 through H6, configuration sensitivity, RBA replication |
-| `archive/` | Earlier process documents |
-
-<details>
-<summary>Full file inventory</summary>
-
-### Scripts
-
-| File | Purpose |
-|------|---------|
-| `pre_ml_lab/experiments/ato_fasttext_poc.py` | Original PoC: FastText on device ID sequences |
-| `pre_ml_lab/experiments/ato_experiment2.py` | Experiment 2: FastText vs. Word2Vec vs. OOV baseline |
-| `pre_ml_lab/experiments/ato_experiment3.py` | Experiment 3: fleet corpus, feature token embeddings, corrected enrollment evaluation |
-| `pre_ml_lab/experiments/plot_conclusions.py` | Generates Experiment 2 figures |
-| `pre_ml_lab/experiments/ato_concat_poc.py` | H2 original PoC: mean-pool vs. concat |
-| `pre_ml_lab/experiments/ato_concat_experiment.py` | H2 five-test experiment |
-| `pre_ml_lab/experiments/h2_rerun_poc.py` | H2 rerun PoC (independent implementation) |
-| `pre_ml_lab/experiments/h2_rerun_experiment1.py` | H2 rerun: bootstrap CIs, window sweep, trivial baseline, permutation tests |
-| `h2_ml_lab/experiments/ato_device_embedding_poc.py` | H2 ml-lab PoC (reveals CBOW collapse) |
-| `h2_ml_lab/experiments/ato_device_embedding_experiment2.py` | H2 ml-lab experiment iteration 1 |
-| `h2_ml_lab/experiments/ato_device_embedding_experiment3.py` | H2 ml-lab experiment iteration 2 |
-| `h2_ml_lab/experiments/robust_config_experiment.py` | Token similarity and compactness diagnostics under robust config |
-| `h2_ml_lab/experiments/config_verification.py` | Side-by-side comparison: degenerate vs. robust training config |
-| `h2_ml_lab/experiments/variable_spoof_experiment.py` | Variable-K spoof (k=1/2/3) × raw vs. rank-norm |
-| `h2_rba/experiments/data_prep.py` | One-shot: download RBA dataset, write parquet |
-| `h2_rba/experiments/rba_rerun.py` | RBA replication: tokenize, train FastText, score, metrics |
-| `h6_hybrid/experiments/data_prep.py` | One-shot: extract RBA clean-login marginals for chain-sampling |
-| `h6_hybrid/experiments/hybrid_experiment.py` | H6: chain-sampled accounts, variable-K spoof, novel, fleet with temporal blocklist |
-
-### Research documents
-
-| File | Purpose |
-|------|---------|
-| `TECHNICAL_REPORT.md` | Definitive synthesis: H2 through H6 |
-| `pre_ml_lab/docs/REPORT.md` | Full report: Experiments 1–3, production constraints |
-| `pre_ml_lab/docs/CONCLUSIONS.md` | Per-finding verdicts and signal hierarchy |
-| `pre_ml_lab/docs/REPORT_ADDENDUM.md` | Production deployment analysis |
-| `pre_ml_lab/docs/H2_REPORT.md` | H2 original investigation report |
-| `pre_ml_lab/docs/H2_RERUN_REPORT.md` | H2 rerun report |
-| `h2_ml_lab/docs/REPORT.md` | H2 ml-lab investigation report |
-| `h2_ml_lab/docs/CONCLUSIONS.md` | H2 ml-lab per-test verdicts |
-| `h2_ml_lab/docs/PEER_REVIEW_R1.md` | Round 1 peer review (3 major issues resolved) |
-| `h2_ml_lab/docs/PEER_REVIEW_R2.md` | Round 2 peer review (2 minor issues, no major) |
-| `h2_rba/docs/HYPOTHESIS.md` | Pre-run hypothesis for RBA replication |
-| `h2_rba/docs/REPORT.md` | RBA replication report with design audit and sensitivity analysis |
-| `h6_hybrid/docs/HYPOTHESIS.md` | Pre-registered H6 hypothesis |
-| `h6_hybrid/docs/REPORT.md` | H6 report: final architecture recommendation and fleet-residual analysis |
-
-</details>
+The `experiments/rerun/` record is authoritative; the per-hypothesis
+directories preserve the original investigations and may contain superseded
+single-run numbers.

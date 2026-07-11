@@ -1,0 +1,185 @@
+# Critique Ablations — Results (A1, A2a, A2b, A3p, A4)
+
+**Plan:** `plan/12-CRITIQUE_ABLATIONS.md` (each ablation pre-specified before its run).
+**Scripts:** `baseline_controls.py`, `h6_perevent_collapse.py`,
+`h6_likelihood_incumbent.py`, `a4_nosub.py`; seeds {42, 123, 456, 789, 2024};
+aggregates in `aggregate/ablations_summary.{json,csv}`.
+
+## Headline
+
+The original positive claim (C1 as stated: FastText mean-pool as the recommended
+encoder) does not survive its controls — but the full ablation set supports a
+*revised* positive recommendation rather than a pure negative result:
+
+1. **A1:** Frozen random embeddings reach spoof ROC 0.836 ± 0.014 — covering ~73%
+   of trained mean-pool's advantage over the trivial baseline on the closed-vocab
+   config. As-proposed FastText adds only +0.032 ROC over no training at all.
+2. **A4:** The reason is the subword machinery: disabling it (max_n=0, plain
+   token embeddings) *improves* spoof ROC to 0.887 ± 0.007 (subwords hurt on 4/5
+   seeds, help on 0/5), and no-subword training beats frozen random on **5/5
+   seeds** (+0.051 ROC, +0.111 PR). Training works; subwords were masking it.
+3. **A2a:** On the small closed vocabulary, the Freeman-style likelihood
+   incumbent beats the trained embedding on every seed (0.895 vs 0.868 ROC).
+4. **A2b:** On the realistic open-vocab 1:100 configuration the ranking
+   *reverses*: mean-pool beats the incumbent's best variant on spoof_k1 on 5/5
+   seeds (PR 0.888 ± 0.026 vs 0.766 ± 0.011; paired delta CI-positive), while
+   the incumbent *also* detects fleet contamination (TP 100 ± 34 vs gate's 0) —
+   C3's suppression is a **binarization trap that transfers across scoring
+   families** (the gated likelihood also scores 0 TP).
+5. **A3p:** Per-event collapse severity is independence-driven: on correlated
+   RBA marginals, pooled SG collapse disappears (0.758 vs 0.939 independent),
+   and the per-feature gradient tracks feature coupling exactly.
+
+## A1 — Frozen random embedding control
+
+| Scorer | Spoof ROC-AUC | Spoof PR-AUC |
+|---|---|---|
+| mp_trained | 0.868 ± 0.012 | 0.787 ± 0.018 |
+| mp_random (frozen N(0,1)) | 0.836 ± 0.014 | 0.712 ± 0.025 |
+| cat_random (random device-hash) | 0.744 ± 0.002 | 0.494 ± 0.009 |
+| trivial | 0.750 | 0.500 |
+
+Verdicts: `a1_trained_beats_random_pr` **5/5**; `a1_trained_beats_random_roc`
+**4/5** (seed 42 ROC delta CI crosses zero: +0.008 [−0.006, +0.023]).
+
+Reading: training is not inert — the paired PR delta is CI-positive on every
+seed — but the frozen-random floor shows most of mean-pool's absolute
+performance is set-overlap geometry ((0.836 − 0.750)/(0.868 − 0.750) ≈ 0.73).
+Per the plan's criterion (both verdicts 5/5), **A1 fails**: C1 cannot be
+presented as "FastText embedding quality" without attributing ~73% of the
+effect to geometry that needs no training. `cat_random` ≈ trivial confirms the
+concat pathology is representational, not a training artifact.
+
+## A2a — Likelihood incumbent
+
+| Scorer | Spoof ROC-AUC | Spoof PR-AUC |
+|---|---|---|
+| lik λ=0.5 (acct/global backoff) | **0.895 ± 0.006** | **0.841 ± 0.009** |
+| lik λ=0.9 | 0.870 ± 0.007 | 0.801 ± 0.011 |
+| lik λ=1.0 (pure per-account) | 0.851 ± 0.007 | 0.765 ± 0.011 |
+| mp_trained | 0.868 ± 0.012 | 0.787 ± 0.018 |
+
+Best variant per seed: λ=0.5 on all 5 seeds. Verdicts:
+`a2_mp_beats_likelihood_roc` **0/5**, `a2_mp_beats_likelihood_pr` **0/5**.
+
+Reading: the CPU-cheap, label-free, industry-standard smoothed per-feature
+likelihood **beats the proposed architecture on the investigation's own primary
+metric** on this closed 30-token vocabulary. See A2b: the ranking reverses on
+the open-vocab realistic configuration — the regime where the embedding wins is
+exactly the larger-vocabulary regime.
+
+## A2b — Likelihood incumbent at 1:100 (H6 open vocabulary)
+
+Best likelihood variant by spoof_k1 ROC: λ=1.0 (pure per-account) on all 5
+seeds. All three pre-specified verdicts **5/5**.
+
+| Scorer | spoof_k1 ROC | spoof_k1 PR | fleet_residual top-1% TP | precision |
+|---|---|---|---|---|
+| mp_raw | **0.995 ± 0.001** | **0.888 ± 0.026** | 91 ± 23 | 0.493 ± 0.116 |
+| lik λ=1.0 | 0.992 ± 0.001 | 0.766 ± 0.011 | **100 ± 34** | 0.534 ± 0.144 |
+| two_stage (gate) | — | — | 0 (all seeds) | 0.000 |
+| lik λ=1.0 gated | — | — | 0 (all seeds) | 0.000 |
+
+Paired spoof_k1 delta (mp_raw − lik_best): ROC +0.003 (CI lower min +0.0002),
+PR **+0.122** (CI lower min +0.052) — CI-positive on every seed.
+
+Reading: two findings. (1) **The closed-vocab incumbent advantage reverses on
+realistic open-vocab data** — the embedding earns its place in the regime the
+architecture was actually proposed for, with the PR gap (+0.12) being the
+operationally meaningful one at 1:100. (2) **C3 is a binarization trap, not an
+embedding property**: the smooth likelihood detects fleet contamination about
+as well as raw cosine (a single training appearance is a low count, not an
+allow-list pass), and wrapping *either* scorer in a binary known-device gate
+zeroes it. The operational lesson is "never binarize on training-window
+membership," independent of scoring family.
+
+## A4 — No-subword cell (closed vocabulary)
+
+| Scorer | Spoof ROC-AUC | Spoof PR-AUC |
+|---|---|---|
+| mp_nosub (max_n=0) | **0.887 ± 0.007** | **0.819 ± 0.011** |
+| mp_trained (subwords) | 0.868 ± 0.012 | 0.787 ± 0.018 |
+| mp_random | 0.836 ± 0.014 | 0.712 ± 0.025 |
+| cat_nosub | 0.752 ± 0.006 | 0.502 ± 0.006 |
+| trivial | 0.750 | 0.500 |
+
+Verdicts: `a4_subwords_help_mp_roc` **0/5**; `a4_subwords_hurt_mp_roc` **4/5**
+(the fifth CI spans zero); `a4_training_helps_nosub_roc` and `_pr` **5/5**
+(mp_nosub − mp_random: +0.051 ROC, +0.111 PR, CI lower min +0.020).
+
+Reading: **subwords are a net negative for in-vocabulary discrimination on
+per-feature tokens** (their OOV benefit is not exercised by any configuration
+here — a deliberate scope limit; an OOV stress test was considered and
+declined 2026-07-11) —
+shared feature-prefix n-grams (`os_`, `tz_`) pull same-feature tokens together
+(within-feature cosine 0.424 with subwords vs 0.330 without) and blunt the
+learned separation. With the confound removed, training beats frozen random on
+every seed: the A1 near-tie was a subword artifact, not evidence that learning
+fails. `cat_nosub` collapses to the trivial baseline (0.752 ≈ 0.750) because
+92.7% ± 1.3% of spoof events are OOV as whole strings — concat *requires*
+subwords to score unseen devices, which is precisely the dependency that
+creates the C1 contamination pathology.
+
+## A3p — Correlated-marginals collapse precursor
+
+Pooled within-feature cosine (wv, threshold 0.9, decision a2b73375):
+
+| Cell | H6 correlated marginals | Closed-vocab independent (rerun factorial) |
+|---|---|---|
+| SG + per-event | 0.758 ± 0.011 (**0/5 collapse**) | 0.939 ± 0.007 (5/5 collapse) |
+| SG + per-account | 0.459 ± 0.011 | 0.424 ± 0.013 |
+| CBOW + per-event | 0.904 ± 0.003 (marginal, >0.9) | 0.982 ± 0.003 (5/5 collapse) |
+| CBOW + per-account | 0.515 ± 0.011 | −0.113 ± 0.006 |
+
+Per-feature gradient (SG + per-event, wv): rtt_bucket 0.961 > asn_bucket 0.801
+> browser 0.776 > country 0.753 > region 0.706 > device_type 0.580 > os 0.551.
+Verdicts (all **5/5**): `a3p_rtt_max_cosine`, `a3p_rtt_min_jsd`,
+`a3p_conditioned_below_threshold`; `a3p_collapse_all` **0/5**.
+
+The embedding-free JSD diagnostic confirms the mechanism: rtt_bucket (the one
+independently sampled feature) has the lowest within-feature context JSD in the
+per-event corpus on every seed (0.26 vs 0.35–0.53 for coupled features). The
+prefix-controlled contrast is rtt_bucket vs asn_bucket (equal-length token
+prefixes): 0.961 vs 0.801 per-event, and rtt stays elevated (0.786) even
+per-account — because RTT is re-sampled per event, neither marginal coupling
+nor account persistence differentiates its values.
+
+Reading: **C2's severity is independence-driven.** On realistically coupled
+features, SG per-event corpora degrade but do not collapse; only the
+independent feature collapses. The C2 claim must be scoped to
+weakly-coupled feature sets (or the full ρ-sweep run to characterize the
+boundary), and the mechanism section rewritten around context-distribution
+overlap, for which feature independence is a necessary condition.
+
+### Collapse-monitor caveat (subword prefix inflation)
+
+Subword-free input vectors (`vectors_vocab`) show within-feature cosine ≈ 0 in
+all H6 cells — the wv-space similarity is carried almost entirely by shared
+feature-prefix character n-grams on this open vocabulary. The monitor operates
+in wv space (which is what the scorer uses), but the 0.9 threshold is not
+prefix-safe: CBOW + per-account (a healthy cell) already puts rtt_bucket at
+0.918. The proposed "deployable collapse monitor" needs per-feature baselines,
+not a single global threshold.
+
+## Implications for the record
+
+- **C1 as written is dead; a revised recommendation survives.** The honest
+  architecture statement: per-feature *plain token* embeddings (no subwords),
+  per-account corpus, mean-pool + centroid cosine, no gate — validated against
+  both the frozen-random control and the likelihood incumbent, with the
+  incumbent winning on small closed vocabularies and the embedding winning on
+  realistic open vocabularies at 1:100.
+- **C2 survives with independence scoping** (A3p): mechanism = context-
+  distribution overlap; severity requires weak feature coupling; synthetic
+  benchmarks with independent generators overstate it.
+- **C3 generalizes upward**: binarization on training-window membership
+  suppresses contaminated-fleet detection for *any* smooth scorer — shown for
+  both cosine and likelihood. This is a stronger, cleaner claim than the
+  original.
+- The collapse monitor needs per-feature baselines (prefix inflation; see A3p
+  caveat) — or, given A4, the cleaner fix is dropping subwords, which removes
+  the inflation at its source.
+
+Remaining phase 2 (optional, not decision-changing): A3 full ρ-sweep
+(dose-response for the coupling effect), A5 1:100 re-pool of the closed-vocab
+evaluation.

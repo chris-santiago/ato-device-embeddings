@@ -1,0 +1,56 @@
+{
+  "seed": 456,
+  "calib_size": 20,
+  "n_train": 60,
+  "n_centroid": 40,
+  "timestamp": "2026-07-09T22:10:04.178545+00:00",
+  "elapsed_sec": 87.49,
+  "config": {
+    "n_accounts": 400,
+    "vocab_size": 224,
+    "corpus_tokens": 168000,
+    "imbalance_ratio": 100,
+    "neg_ratio": 100,
+    "n_bootstrap": 1000,
+    "attack_type": "spoof_k1",
+    "smoke": false
+  },
+  "t8_token_similarity": {
+    "within_feature_mean": 0.6148888468742371,
+    "cross_feature_mean": 0.4066486954689026,
+    "within_cross_ratio": 1.5120885760255909,
+    "collapse_detected": false
+  },
+  "spoof_k1": {
+    "mp_raw": {
+      "roc_auc": 0.9941828575,
+      "pr_auc": 0.8857617275617083,
+      "ci_lower": 0.8741858184409382,
+      "ci_upper": 0.8968522693399845,
+      "margins": {
+        "contamination_rate": 0.01323,
+        "robust_margin": 0.06684383153915405,
+        "p10_attack": 0.13537182807922363,
+        "mean_pos": 0.22095891442894935,
+        "mean_neg": 0.01891201091736555,
+        "n_pos": 2000,
+        "n_neg": 200000
+      }
+    },
+    "mp_rank_norm": {
+      "roc_auc": 0.9720449,
+      "pr_auc": 0.2070738159646711,
+      "ci_lower": 0.1952389477944352,
+      "ci_upper": 0.21850969636925371,
+      "margins": {
+        "contamination_rate": 0.05032,
+        "robust_margin": 0.050000000000000044,
+        "p10_attack": 0.9,
+        "mean_pos": 0.9685499999999999,
+        "mean_neg": 0.2481675,
+        "n_pos": 2000,
+        "n_neg": 200000
+      }
+    }
+  }
+}
