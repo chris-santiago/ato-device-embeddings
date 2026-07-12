@@ -194,9 +194,16 @@ signal the categorical incumbent floors identically. The subword machinery is a
 regime-dependent trade — a liability on stable closed vocabularies, an asset when novel
 values are variants of known ones (version strings, structured IDs, typos). A4's
 plain-token recommendation holds for the studied in-vocab regime, but a deployment
-expecting version/ID drift should weigh the OOV benefit A4's scope excluded. Open
-thread: benign-only (asymmetric) OOV arm not yet run — would test whether the
-false-positive collapse sharpens when only legitimate traffic drifts.
+expecting version/ID drift should weigh the OOV benefit A4's scope excluded.
+
+**Scope — benign-only arm not pursued (by design).** A benign-only (asymmetric) OOV
+arm has no realistic generating process: vocabulary drift is a property of time and
+the population, so novel values hit legitimate and attacker traffic alike. If any
+asymmetry exists it runs the *other* way — attacker devices (emulators, fresh
+infrastructure, anti-fingerprinting) skew toward less-represented values, i.e.
+marginally *more* OOV-prone — and that direction is already partly captured by the
+spoof/novel attack construction. "Both sides drift" is therefore the realistic model,
+and the arm is intentionally not run rather than deferred.
 
 ## A3p — Correlated-marginals collapse precursor
 
