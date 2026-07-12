@@ -208,15 +208,17 @@ trained token vectors). Measured against *that* baseline, subwords do not win:
 |---|---|---|---|
 | in-vocab (p=0, both arms) | 0.837 | **0.914** | −0.076 (fallback; the A4 effect) |
 | region_arb (arbitrary) | 0.473 | **0.662** | −0.189 (fallback, CI-robust) |
-| region_morph (morphological) | **0.746** | 0.662 | +0.085 (tie, 5-seed CI crosses 0) |
+| region_morph (morphological) | **0.746** | 0.662 | +0.085 (directional edge, 5-seed CI crosses 0) |
 
 The fallback is blind to surface form — every unseen value of a feature maps to the
 feature mean, so it scores identically (0.662) on both region arms at p=1. Subwords
 see surface form: they recover morphological variants (0.746) but fabricate misleading
 vectors for arbitrary codes (0.473) that scatter the benign class into false positives
 under 1:100 imbalance. Because device attribute codes carry no informative character
-structure, the fallback matches or beats subwords at every level; subwords only tie
-under heavy morphological drift. This **strengthens** the plain-token (`max_n=0`)
+structure, the fallback matches or beats subwords in-vocab and under arbitrary drift;
+subwords take a directional edge only under heavy morphological drift (a clean monotonic
+crossover around p ≈ 0.5, though the per-seed CI still crosses zero). This
+**strengthens** the plain-token (`max_n=0`)
 recommendation — it now holds under OOV, not just in-vocab, closing the trade-off A4
 left open. FastText's subword OOV advantage requires morphologically-structured fields
 (version strings, structured IDs); geo/network categorical codes are not that, and the

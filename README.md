@@ -12,8 +12,9 @@ from FastText's distinguishing feature: character n-gram subwords measurably
 hurt in-vocabulary discrimination and are not repaid by out-of-vocabulary
 robustness. Measured directly, a per-feature fallback vector (which
 field-tokenized telemetry always affords) matches or beats subword composition
-at every OOV level, because device attribute codes carry no informative
-character structure. On small vocabularies a smoothed counting baseline
+for arbitrary novel values, the realistic case for device attributes whose codes
+carry no informative character structure. Subwords hold only a directional,
+not-robust edge under morphological drift on versioned/structured fields. On small vocabularies a smoothed counting baseline
 beats every embedding configuration tested; on realistic open vocabularies at
 1:100 imbalance, plain token embeddings earn their place. Every number below is
 a 5-seed mean ± std from the reproducibility record in `experiments/rerun/`.
@@ -100,13 +101,16 @@ informative characters with any seen value) the fallback beats subwords by
 from meaningless n-gram hashes and scatters the benign class into false
 positives, while the fallback maps every unseen value of a feature to one stable
 vector. Under **morphological** drift (`region_viken` → `region_viken_v577`,
-shared stem) subwords recover the value and close their deficit, but only to a
-tie (+0.085 PR at p=1, 5-seed CI crossing zero); and they start behind
-in-vocabulary (−0.076 PR at p=0). Net: a fallback vector dominates subword
-composition across regimes, because device attribute codes have no morphology
-for n-grams to exploit. `max_n=0` holds in-vocab and under OOV alike; subwords
-would earn their cost only on genuinely morphological fields (version strings,
-structured IDs), and even there they merely tie.
+shared stem) subwords progressively overtake the fallback: a clean monotonic
+crossover around p ≈ 0.5, reaching +0.085 PR at full drift. This is the one
+regime where the subword mechanism earns its keep, though the per-seed CI at
+each level still crosses zero, so it is a directional edge, not a robust margin.
+Subwords start behind in-vocabulary (−0.076 PR at p=0). Net: for device
+attribute codes, which have no morphology for n-grams to exploit, a fallback
+vector dominates subword composition in-vocabulary and under arbitrary drift, and
+`max_n=0` is the right default there. Subwords earn their cost only on genuinely
+morphological fields (version strings, structured IDs), where the crossover above
+gives them a directional edge over the fallback.
 
 **4 — "Always use skip-gram."** The 2×2 factorial (objective × corpus) shows
 corpus construction is the causal axis of embedding health. Both per-event
