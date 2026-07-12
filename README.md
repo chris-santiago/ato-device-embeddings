@@ -10,7 +10,7 @@ threshold.** The value in the architecture comes from per-feature tokenization,
 per-account corpus construction, and centroid cosine scoring. It does not come
 from FastText's distinguishing feature: character n-gram subwords measurably
 hurt in-vocabulary discrimination and are justified only as a priced trade-off
-for out-of-vocabulary drift. On small vocabularies a smoothed counting baseline
+for morphological (version-like) out-of-vocabulary drift — measured, not assumed. On small vocabularies a smoothed counting baseline
 beats every embedding configuration tested; on realistic open vocabularies at
 1:100 imbalance, plain token embeddings earn their place. Every number below is
 a 5-seed mean ± std from the reproducibility record in `experiments/rerun/`.
@@ -54,7 +54,7 @@ rules that survive are the design in the next section.
 |---|---|---|
 | 1 | Embed the concatenated device string | Structurally broken |
 | 2 | The embedding learns device semantics | Mostly set-overlap geometry |
-| 3 | Subwords add robustness for free | They cost accuracy; the benefit is unmeasured |
+| 3 | Subwords add robustness for free | They cost in-vocab accuracy; the OOV benefit is real but priced, and only for morphological drift |
 | 4 | Skip-gram is mandatory | The corpus is causal, the objective is not |
 | 5 | Per-event corpora destroy embeddings | True only for weakly-coupled features |
 | 6 | Gate alerts on known devices | Suppresses exactly the attacks that matter, in any scoring family |
@@ -85,12 +85,20 @@ embeddings, everything else identical) *improves* spoof detection to
 4/5 seeds and positive on none, because shared feature prefixes (`os_`, `tz_`)
 pull same-feature tokens together and blunt the separation the scorer needs.
 Only the no-subword encoder beats the random floor on all seeds (+0.051 ROC,
-+0.111 PR). The OOV robustness subwords are purchased for is not exercised by
-any evaluation here, and in field-tokenized telemetry the field of an unseen
-value is always known, so an explicit per-feature fallback vector is always
-available. Retaining subwords is a deliberate trade: pay ~0.02 ROC / 0.03 PR
-in-vocabulary for surface-form generalization that should matter mainly under
-version-like value drift.
++0.111 PR). The OOV robustness subwords are purchased for is now measured
+directly (`oov_regime.py`): novel tokens injected into both benign and attack
+events at 1:100 imbalance, with a same-feature disambiguation on `region` that
+splits two effects the incumbent cannot. Mean-pool dilution alone (one corrupted
+token of seven) beats the likelihood incumbent by +0.19 PR-AUC even on arbitrary
+novel strings; subword recovery adds a further +0.27 PR-AUC when the novel value
+is a morphological variant of a seen one. The incumbent floors both cases
+identically to PR 0.284, unable to tell `region_viken_v577` from `region_x9f3q`.
+This confirms the trade rather than assuming it: subwords cost ~0.02 ROC /
+0.03 PR in-vocabulary and repay it precisely under version-like value drift, not
+under wholly-novel values, where mean-pooling carries the robustness instead.
+The effect is a PR-AUC phenomenon at deployment imbalance and is ~15x smaller on
+ROC. In field-tokenized telemetry the field of an unseen value is always known,
+so an explicit per-feature fallback vector is available regardless.
 
 **4 — "Always use skip-gram."** The 2×2 factorial (objective × corpus) shows
 corpus construction is the causal axis of embedding health. Both per-event
@@ -194,6 +202,7 @@ uv run experiments/rerun/ablations/a4_nosub.py --smoke        # subword ablation
 | Claim | Evidence |
 |---|---|
 | Refutations 1–3 (concat, random floor, subwords) | `experiments/rerun/scripts/h2/`, `experiments/rerun/ablations/` (`baseline_controls.py`, `a4_nosub.py`) |
+| Subword OOV trade — dilution vs recovery (refutation 3, measured) | `experiments/rerun/ablations/oov_regime.py`, `SUMMARY.md` (OOV section) |
 | Refutation 4 (factorial) and 5 (collapse + scoping) | `experiments/rerun/scripts/h2/h2_rerun.py`, `experiments/rerun/ablations/h6_perevent_collapse.py` |
 | Refutation 6 (gate, cross-family) | `experiments/rerun/scripts/h6/`, `experiments/rerun/ablations/h6_likelihood_incumbent.py` |
 | Refutation 7 (rank-norm) | `experiments/rerun/calib_sweep/` |
