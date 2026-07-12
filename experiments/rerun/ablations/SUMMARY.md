@@ -137,10 +137,16 @@ tokens are injected into **both** benign and attack eval events at level `p`; th
 training corpus and likelihood tables are kept OOV-free by construction, so the
 incumbent floors every novel value to its smoothing constant while FastText composes
 an OOV vector from character n-grams. 1:100 imbalance (~1% base rate, auto-scaled to
-100 accounts). Four arms cross OOV construction (morphological version-suffix vs
-arbitrary random string) × feature target (`os`/`browser`, `region`/`asn`, and
-`region`-only for the disambiguation). Figures: `figures/oov_degradation_*_{roc,pr}_auc.png`,
-`figures/oov_delta_attribution.png`.
+100 accounts). Encoders compared: FastText subwords (`mp_raw`), the design's
+recommended no-subword + per-feature-fallback (`mp_nosub`: unseen value → mean of that
+feature's trained vectors), the Freeman likelihood incumbent, and trivial
+set-membership. Arms inject into single features (`region_arb`, `region_morph` — the
+mechanism reference) and into **correlated clusters** mirroring real drift: `device` =
+{os, browser, device_type} morphologically (version bumps), `geo` = {country, region,
+asn} arbitrarily (new codes), and `geo_device` (both); `rtt_bucket` (coarse 5-way) stays
+clean. Populations: `spoof_k1` (pure geo attack) and `spoof_k2` (geo **and** device —
+the partial-overlap control). Two lessons generalize beyond this dataset; geo/device is
+the worked example. Figures: `figures/oov_degradation_*_{roc,pr}_auc.png`.
 
 ### Symmetric OOV does not collapse either model on ROC
 
@@ -152,18 +158,10 @@ moves ranking. ROC is the wrong lens here — the effect lives in precision unde
 
 ### PR-AUC under imbalance is where the models separate
 
-| Arm (spoof_k1) | mp_raw PR  p=0 → p=1 | incumbent PR  p=0 → p=1 | dPR @ p=1 |
-|---|---|---|---|
-| arbitrary (region/asn, random) | 0.837 → **0.498 ± 0.083** | 0.764 → **0.258 ± 0.046** | **+0.241** |
-| morphological (os/browser, version) | 0.837 → 0.895 ± 0.027 | 0.764 → 0.932 ± 0.008 | −0.037 |
-
-On the realistic arm (arbitrary novelty on high-cardinality geo/network) the incumbent's
-precision **craters** (0.76 → 0.26) while mean-pool holds (0.84 → 0.50); dPR peaks
-**+0.310** at p=0.5. Over the same sweep the ROC gap peaked at only +0.017 — **ROC
-understated the operational gap ~15×.** On the morphological arm the OOV lands on
-low-cardinality, non-discriminative `os`/`browser`: the floored feature becomes a
-constant for both classes (deletes a noisy dimension), both models *improve*, and the
-incumbent edges ahead at p=1 (dPR −0.037).
+On arbitrary single-feature drift (`region_arb`) the incumbent's precision **craters**
+0.764 → 0.284 while the embedding holds 0.914 → 0.662; over the same sweep the ROC gap
+peaked at only +0.017, so **ROC understated the operational gap ~15×**. Report PR at
+deployment imbalance, stratified by attack — never aggregate ROC.
 
 ### Same-feature disambiguation: dilution + subword recovery
 
@@ -197,7 +195,7 @@ comparison uses the wrong baseline: measured against the design's recommended
 `max_n=0` + per-feature fallback encoder (next subsection), the subword benefit does
 not survive.
 
-### Subword composition vs the recommended fallback encoder
+### Lesson 1 — OOV handling is variance-vs-bias (subword vs fallback)
 
 The +0.27 dPR "subword recovery" above is measured against the *incumbent*, which
 floors OOV. The design does not recommend the incumbent — it recommends `max_n=0`
@@ -223,6 +221,30 @@ recommendation — it now holds under OOV, not just in-vocab, closing the trade-
 left open. FastText's subword OOV advantage requires morphologically-structured fields
 (version strings, structured IDs); geo/network categorical codes are not that, and the
 fallback is the better OOV mechanism there.
+
+### Lesson 2 — OOV robustness is an overlap property
+
+Single-feature OOV overstates robustness. Injecting into **correlated clusters** shows
+detectability tracks how much the drift overlaps the attack's discriminative features,
+independent of encoder:
+
+| drift ∩ discriminative signal | spoof PR @ p=1 (fallback) | instance |
+|---|---|---|
+| 0% (non-overlap) | **0.99** | `device` drift vs spoof_k1 (geo attack) |
+| partial | 0.03 (0.22 @ p=0.5) | `geo` drift vs spoof_k2 (geo+device) |
+| 100% (full overlap) | **0.01 ≈ chance** | `geo` drift vs spoof_k1 (geo-only) |
+
+At full overlap **every method collapses to the base rate** — subword, fallback,
+incumbent, and trivial alike (dPR → 0): corrupting the discriminative features on both
+classes makes a legitimate novel login indistinguishable from an attacker's, so no
+encoder can separate them. The Lesson-1 ranking re-appears only on *surviving* signal —
+under partial overlap the fallback still leads (`spoof_k2` @ p=0.5: 0.221 vs 0.147
+subword). Design corollary: a detector is OOV-fragile exactly to the degree its
+discriminative signal concentrates in features that also drift for legitimate traffic;
+robustness requires spreading signal across features that don't co-drift — the same
+independence principle A3p found for collapse, reached from the OOV side. (`spoof_k1`'s
+signal is geo *by construction*, so `geo` drift is a 100%-overlap instance; this is a
+property of drift∩signal alignment, not of geo specifically.)
 
 **Scope — benign-only arm not pursued (by design).** A benign-only (asymmetric) OOV
 arm has no realistic generating process: vocabulary drift is a property of time and

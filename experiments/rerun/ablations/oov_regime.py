@@ -52,18 +52,25 @@ import h6_likelihood_incumbent as LIK  # noqa: E402
 
 # --- OOV sweep configuration -------------------------------------------------
 LEVELS = [0.0, 0.1, 0.25, 0.5, 0.75, 1.0]
-POPULATIONS = ["spoof_k1", "novel"]
+# spoof_k1 = geo-only attack (country/region/asn); spoof_k2 additionally changes
+# device features (os/browser/device_type), so under geo-cluster drift its device signal
+# survives — the control that separates signal-overlap collapse from encoder failure.
+POPULATIONS = ["spoof_k1", "spoof_k2", "novel"]
+# Arms are lists of (feature, kind) pairs corrupted together per selected event. Clusters
+# mirror how RBA attributes actually drift: a device change moves os/browser/device_type
+# morphologically (new versions), a geo/network change moves country/region/asn_bucket
+# arbitrarily (new codes). rtt_bucket is a coarse 5-way bucket that ~never goes OOV, so it
+# stays clean as the anchor. Single-feature region arms are kept as the K=1 reference.
+_GEO = [("country", "rand"), ("region", "rand"), ("asn_bucket", "rand")]
+_DEVICE = [("os", "morph"), ("browser", "morph"), ("device_type", "morph")]
 ARMS = {
-    # Cross-feature arms (realistic scenarios): morphological drift on stable low-card
-    # os/browser vs arbitrary novelty on high-card geo/network.
-    "morphological": {"features": ["os", "browser"], "kind": "morph"},
-    "arbitrary": {"features": ["region", "asn_bucket"], "kind": "rand"},
-    # Same-feature disambiguation arms: both target region (high-card, discriminative) so
-    # morphology-vs-floor-avoidance is isolated from which feature carries the signal.
-    "region_morph": {"features": ["region"], "kind": "morph"},
-    "region_arb": {"features": ["region"], "kind": "rand"},
+    "region_arb": [("region", "rand")],       # 1 feature, arbitrary (reference)
+    "region_morph": [("region", "morph")],    # 1 feature, morphological (reference)
+    "geo_cluster": _GEO,                       # single correlated cluster, arbitrary (3)
+    "device_cluster": _DEVICE,                 # single correlated cluster, morphological (3)
+    "geo_device": _GEO + _DEVICE,              # multiple clusters (6 of 7 features)
 }
-ARM_ORDER = ["morphological", "arbitrary", "region_morph", "region_arb"]
+ARM_ORDER = ["region_arb", "region_morph", "geo_cluster", "device_cluster", "geo_device"]
 POP_ORDER = {p: i for i, p in enumerate(POPULATIONS)}
 ALPHABET = np.array(list("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"))
 
@@ -118,16 +125,15 @@ def make_oov_value(base: str, kind: str, banned: set, rng) -> str:
 
 
 def inject_oov(event: dict, arm_name: str, p: float, banned: dict, rng) -> dict:
-    """With per-event probability p, replace one of the arm's target features with a
-    novel token. Returns the original event untouched when not selected."""
+    """With per-event probability p, replace every (feature, kind) in the arm with a novel
+    token — a whole correlated cluster drifts at once. Returns the event untouched if not
+    selected."""
     if p <= 0.0 or rng.random() >= p:
         return event
-    spec = ARMS[arm_name]
-    feats = spec["features"]
-    f = feats[int(rng.integers(len(feats)))]
     e = dict(event)
-    base = str(e.get(f, "unknown"))
-    e[f] = make_oov_value(base, spec["kind"], banned[f], rng)
+    for f, kind in ARMS[arm_name]:
+        base = str(e.get(f, "unknown"))
+        e[f] = make_oov_value(base, kind, banned[f], rng)
     return e
 
 

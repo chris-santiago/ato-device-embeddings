@@ -112,6 +112,18 @@ vector dominates subword composition in-vocabulary and under arbitrary drift, an
 morphological fields (version strings, structured IDs), where the crossover above
 gives them a directional edge over the fallback.
 
+Two OOV lessons generalize beyond subwords. **(i) Handling is variance-vs-bias:**
+for information-poor categorical codes, substitute a low-variance constant (the
+fallback), not a per-value composed vector — under imbalance the composition's
+per-event variance becomes false positives in the majority class. **(ii)
+Robustness is an overlap property:** a detector survives OOV only to the degree
+the drift misses its discriminative features. A correlated-cluster sweep confirms
+it — corrupting a full discriminative cluster on both classes collapses detection
+to the base rate for *every* encoder (subword, fallback, likelihood, and trivial
+alike), while drift on off-signal features is near-harmless. Single-feature OOV
+stress tests therefore overstate robustness. See `experiments/rerun/ablations/SUMMARY.md`
+(OOV section) for the cluster sweep and the drift∩signal-overlap table.
+
 **4 — "Always use skip-gram."** The 2×2 factorial (objective × corpus) shows
 corpus construction is the causal axis of embedding health. Both per-event
 cells collapse on all seeds regardless of objective; both per-account cells are
