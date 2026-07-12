@@ -188,6 +188,90 @@ def aggregate_h6_likelihood(runs: dict) -> dict:
             "verdicts": verdicts, "best_likelihood_variant": best_variants}
 
 
+def aggregate_oov(runs: dict) -> dict:
+    """Cross-seed aggregation for the OOV-regime sweep (oov_regime.py).
+
+    Reports per (arm, level, population) mean±std for every scorer, a per-seed-selected
+    incumbent line (lik_best), the FastText−incumbent spoof_k1 delta, and the subword-
+    attribution quantity gap(morphological) − gap(arbitrary) at matched levels.
+    """
+    seeds = sorted(runs)
+    cfg = runs[seeds[0]]["config"]
+    arms = cfg["arms"]
+    levels = [f"{p:.2f}" for p in cfg["levels"]]
+    pops = cfg["populations"]
+    best_variant = {s: runs[s]["best_likelihood_variant"] for s in seeds}
+
+    def cell(arm, lvl):
+        return {s: runs[s]["results"][arm][lvl] for s in seeds}
+
+    metrics = {}
+    for arm in arms:
+        metrics[arm] = {}
+        for lvl in levels:
+            metrics[arm][lvl] = {}
+            for pop in pops:
+                names = sorted(runs[seeds[0]]["results"][arm][lvl]["metrics"][pop])
+                cm = {}
+                for name in names:
+                    for key in ["roc_auc", "pr_auc", "top1pct_tp", "top1pct_precision"]:
+                        vals = [(runs[s]["results"][arm][lvl]["metrics"][pop].get(name) or {}).get(key)
+                                for s in seeds]
+                        cm[f"{name}_{key}"] = mean_std(vals)
+                # incumbent line: per-seed best-lambda variant
+                for key in ["roc_auc", "pr_auc", "top1pct_tp", "top1pct_precision"]:
+                    vals = [(runs[s]["results"][arm][lvl]["metrics"][pop].get(best_variant[s]) or {}).get(key)
+                            for s in seeds]
+                    cm[f"lik_best_{key}"] = mean_std(vals)
+                metrics[arm][lvl][pop] = cm
+
+    deltas = {}
+    for arm in arms:
+        deltas[arm] = {}
+        for lvl in levels:
+            d = {}
+            for metric in ["roc", "pr"]:
+                trips = [runs[s]["results"][arm][lvl]["delta_mp_minus_likbest_spoof_k1"][metric]
+                         for s in seeds]
+                d[metric] = {
+                    "point": mean_std([t[0] for t in trips]),
+                    "ci_lower_min": float(np.min([t[1] for t in trips])),
+                    "ci_upper_max": float(np.max([t[2] for t in trips])),
+                    "per_seed_point": [t[0] for t in trips],
+                }
+            deltas[arm][lvl] = d
+
+    # Attribution = gap(morph arm) − gap(arbitrary arm) at matched levels. cross_feature is
+    # confounded with feature choice; same_feature_region isolates morphology on one feature.
+    attr_pairs = [("cross_feature", "morphological", "arbitrary"),
+                  ("same_feature_region", "region_morph", "region_arb")]
+    subword = {}
+    for pname, marm, aarm in attr_pairs:
+        if marm not in arms or aarm not in arms:
+            continue
+        subword[pname] = {}
+        for lvl in levels:
+            s_att = {}
+            for metric in ["roc", "pr"]:
+                gaps = [
+                    runs[s]["results"][marm][lvl]["delta_mp_minus_likbest_spoof_k1"][metric][0]
+                    - runs[s]["results"][aarm][lvl]["delta_mp_minus_likbest_spoof_k1"][metric][0]
+                    for s in seeds
+                ]
+                s_att[metric] = mean_std(gaps)
+            subword[pname][lvl] = s_att
+
+    obs = {
+        arm: {lvl: mean_std([cell(arm, lvl)[s]["obs_oov_rate"]["spoof_k1"] for s in seeds])
+              for lvl in levels}
+        for arm in arms
+    }
+    return {"seeds": seeds, "arms": arms, "levels": levels, "populations": pops,
+            "neg_ratio": cfg.get("neg_ratio"),
+            "metrics": metrics, "deltas": deltas, "subword_attribution": subword,
+            "obs_oov_rate": obs, "best_likelihood_variant": best_variant}
+
+
 def write_csv(summary: dict, path: Path):
     rows = []
     base = summary.get("baseline_controls")
@@ -240,6 +324,25 @@ def write_csv(summary: dict, path: Path):
         for v, stat in a4["verdicts"].items():
             rows.append(["a4_nosub", "verdict", v,
                          f"{stat['confirmed']}/{stat['n_seeds']}", ""])
+    oov = summary.get("oov_regime")
+    if oov:
+        for arm in oov["arms"]:
+            for lvl in oov["levels"]:
+                for pop in oov["populations"]:
+                    for key, stat in oov["metrics"][arm][lvl][pop].items():
+                        rows.append(["oov_regime", f"{arm}|p={lvl}|{pop}", key,
+                                     stat["mean"], stat["std"]])
+                for metric in ["roc", "pr"]:
+                    d = oov["deltas"][arm][lvl][metric]
+                    rows.append(["oov_regime", f"{arm}|p={lvl}", f"delta_mp_minus_likbest_{metric}_point",
+                                 d["point"]["mean"], d["point"]["std"]])
+                    rows.append(["oov_regime", f"{arm}|p={lvl}", f"delta_mp_minus_likbest_{metric}_ci_lower_min",
+                                 d["ci_lower_min"], ""])
+        for pname, per_lvl in oov["subword_attribution"].items():
+            for lvl, s_att in per_lvl.items():
+                for metric, stat in s_att.items():
+                    rows.append(["oov_regime", f"attribution|{pname}|p={lvl}", metric,
+                                 stat["mean"], stat["std"]])
     with open(path, "w", newline="") as f:
         writer = csv.writer(f)
         writer.writerow(["experiment", "group", "metric", "mean", "std"])
@@ -251,6 +354,7 @@ def main():
     h6_runs = load("h6_perevent_seed_{seed}.json")
     lik_runs = load("h6_likelihood_seed_{seed}.json")
     a4_runs = load("a4_nosub_seed_{seed}.json")
+    oov_runs = load("oov_regime_seed_{seed}.json")
     summary = {"schema_version": 1, "plan": "plan/12-CRITIQUE_ABLATIONS.md"}
     if baseline_runs:
         summary["baseline_controls"] = aggregate_baseline(baseline_runs)
@@ -260,6 +364,8 @@ def main():
         summary["h6_likelihood"] = aggregate_h6_likelihood(lik_runs)
     if a4_runs:
         summary["a4_nosub"] = aggregate_a4(a4_runs)
+    if oov_runs:
+        summary["oov_regime"] = aggregate_oov(oov_runs)
 
     out_dir = ROOT / "aggregate"
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -321,6 +427,25 @@ def main():
                   f"(CI lower min {r['ci_lower_min']:+.4f}, upper max {r['ci_upper_max']:+.4f})")
         for v, stat in a["verdicts"].items():
             print(f"  {v}: {stat['confirmed']}/{stat['n_seeds']}")
+    if "oov_regime" in summary:
+        o = summary["oov_regime"]
+        print(f"\n=== OOV regime (seeds present: {o['seeds']}) ===")
+        for arm in o["arms"]:
+            print(f"  [{arm}] spoof_k1 ROC-AUC  (mp_raw / lik_best / trivial)  +  dROC(mp-lik)")
+            for lvl in o["levels"]:
+                m = o["metrics"][arm][lvl]["spoof_k1"]
+                mp, lik, triv = m["mp_raw_roc_auc"], m["lik_best_roc_auc"], m["trivial_roc_auc"]
+                d = o["deltas"][arm][lvl]["roc"]["point"]
+                print(f"    p={lvl}  mp={mp['mean']:.3f}±{mp['std']:.3f}  "
+                      f"lik={lik['mean']:.3f}±{lik['std']:.3f}  "
+                      f"triv={triv['mean']:.3f}±{triv['std']:.3f}  "
+                      f"dROC={d['mean']:+.3f}±{d['std']:.3f}")
+        for pname, per_lvl in o["subword_attribution"].items():
+            print(f"  attribution [{pname}]  gap(morph)-gap(arb)  dPR (dROC):")
+            for lvl, s_att in per_lvl.items():
+                pr, rc = s_att["pr"], s_att["roc"]
+                print(f"    p={lvl}  dPR={pr['mean']:+.4f}±{pr['std']:.4f}  "
+                      f"dROC={rc['mean']:+.4f}±{rc['std']:.4f}")
 
 
 if __name__ == "__main__":
