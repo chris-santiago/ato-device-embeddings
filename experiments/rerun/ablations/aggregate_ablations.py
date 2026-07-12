@@ -225,21 +225,27 @@ def aggregate_oov(runs: dict) -> dict:
                     cm[f"lik_best_{key}"] = mean_std(vals)
                 metrics[arm][lvl][pop] = cm
 
-    deltas = {}
-    for arm in arms:
-        deltas[arm] = {}
-        for lvl in levels:
-            d = {}
-            for metric in ["roc", "pr"]:
-                trips = [runs[s]["results"][arm][lvl]["delta_mp_minus_likbest_spoof_k1"][metric]
-                         for s in seeds]
-                d[metric] = {
-                    "point": mean_std([t[0] for t in trips]),
-                    "ci_lower_min": float(np.min([t[1] for t in trips])),
-                    "ci_upper_max": float(np.max([t[2] for t in trips])),
-                    "per_seed_point": [t[0] for t in trips],
-                }
-            deltas[arm][lvl] = d
+    def build_deltas(delta_key):
+        out = {}
+        for arm in arms:
+            out[arm] = {}
+            for lvl in levels:
+                d = {}
+                for metric in ["roc", "pr"]:
+                    trips = [runs[s]["results"][arm][lvl][delta_key][metric] for s in seeds]
+                    d[metric] = {
+                        "point": mean_std([t[0] for t in trips]),
+                        "ci_lower_min": float(np.min([t[1] for t in trips])),
+                        "ci_upper_max": float(np.max([t[2] for t in trips])),
+                        "per_seed_point": [t[0] for t in trips],
+                    }
+                out[arm][lvl] = d
+        return out
+
+    deltas = build_deltas("delta_mp_minus_likbest_spoof_k1")  # FastText vs incumbent
+    # FastText subwords vs the README's no-subword + per-feature-fallback encoder.
+    has_nosub = "delta_mp_minus_nosub_spoof_k1" in runs[seeds[0]]["results"][arms[0]][levels[0]]
+    nosub_deltas = build_deltas("delta_mp_minus_nosub_spoof_k1") if has_nosub else {}
 
     # Attribution = gap(morph arm) − gap(arbitrary arm) at matched levels. cross_feature is
     # confounded with feature choice; same_feature_region isolates morphology on one feature.
@@ -268,7 +274,8 @@ def aggregate_oov(runs: dict) -> dict:
     }
     return {"seeds": seeds, "arms": arms, "levels": levels, "populations": pops,
             "neg_ratio": cfg.get("neg_ratio"),
-            "metrics": metrics, "deltas": deltas, "subword_attribution": subword,
+            "metrics": metrics, "deltas": deltas, "nosub_deltas": nosub_deltas,
+            "subword_attribution": subword,
             "obs_oov_rate": obs, "best_likelihood_variant": best_variant}
 
 
@@ -338,6 +345,11 @@ def write_csv(summary: dict, path: Path):
                                  d["point"]["mean"], d["point"]["std"]])
                     rows.append(["oov_regime", f"{arm}|p={lvl}", f"delta_mp_minus_likbest_{metric}_ci_lower_min",
                                  d["ci_lower_min"], ""])
+                for metric in ["roc", "pr"]:
+                    dn = oov.get("nosub_deltas", {}).get(arm, {}).get(lvl, {}).get(metric)
+                    if dn:
+                        rows.append(["oov_regime", f"{arm}|p={lvl}", f"delta_mp_minus_nosub_{metric}_point",
+                                     dn["point"]["mean"], dn["point"]["std"]])
         for pname, per_lvl in oov["subword_attribution"].items():
             for lvl, s_att in per_lvl.items():
                 for metric, stat in s_att.items():
@@ -431,15 +443,15 @@ def main():
         o = summary["oov_regime"]
         print(f"\n=== OOV regime (seeds present: {o['seeds']}) ===")
         for arm in o["arms"]:
-            print(f"  [{arm}] spoof_k1 ROC-AUC  (mp_raw / lik_best / trivial)  +  dROC(mp-lik)")
+            print(f"  [{arm}] spoof_k1 PR-AUC  (mp_raw / mp_nosub / lik_best)  +  dPR(mp-nosub)")
             for lvl in o["levels"]:
                 m = o["metrics"][arm][lvl]["spoof_k1"]
-                mp, lik, triv = m["mp_raw_roc_auc"], m["lik_best_roc_auc"], m["trivial_roc_auc"]
-                d = o["deltas"][arm][lvl]["roc"]["point"]
+                mp, ns, lik = m["mp_raw_pr_auc"], m["mp_nosub_pr_auc"], m["lik_best_pr_auc"]
+                d = o.get("nosub_deltas", {}).get(arm, {}).get(lvl, {}).get("pr", {}).get("point")
+                dstr = f"  dPR(mp-nosub)={d['mean']:+.3f}±{d['std']:.3f}" if d else ""
                 print(f"    p={lvl}  mp={mp['mean']:.3f}±{mp['std']:.3f}  "
-                      f"lik={lik['mean']:.3f}±{lik['std']:.3f}  "
-                      f"triv={triv['mean']:.3f}±{triv['std']:.3f}  "
-                      f"dROC={d['mean']:+.3f}±{d['std']:.3f}")
+                      f"nosub={ns['mean']:.3f}±{ns['std']:.3f}  "
+                      f"lik={lik['mean']:.3f}±{lik['std']:.3f}{dstr}")
         for pname, per_lvl in o["subword_attribution"].items():
             print(f"  attribution [{pname}]  gap(morph)-gap(arb)  dPR (dROC):")
             for lvl, s_att in per_lvl.items():

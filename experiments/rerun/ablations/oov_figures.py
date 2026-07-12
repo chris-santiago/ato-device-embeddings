@@ -27,7 +27,8 @@ SUMMARY = ROOT / "aggregate" / "ablations_summary.json"
 FIG_DIR = ROOT / "figures"
 
 SERIES = [
-    ("mp_raw", "FastText (mp_raw)", "#1f77b4"),
+    ("mp_raw", "FastText (subwords)", "#1f77b4"),
+    ("mp_nosub", "No-subword + fallback", "#2ca02c"),
     ("lik_best", "Incumbent (lik_best)", "#d62728"),
     ("trivial", "Trivial (set-membership)", "#7f7f7f"),
 ]

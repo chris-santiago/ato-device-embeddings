@@ -9,8 +9,11 @@ The short answer: **not as usually proposed, and never below a vocabulary-size
 threshold.** The value in the architecture comes from per-feature tokenization,
 per-account corpus construction, and centroid cosine scoring. It does not come
 from FastText's distinguishing feature: character n-gram subwords measurably
-hurt in-vocabulary discrimination and are justified only as a priced trade-off
-for morphological (version-like) out-of-vocabulary drift — measured, not assumed. On small vocabularies a smoothed counting baseline
+hurt in-vocabulary discrimination and are not repaid by out-of-vocabulary
+robustness. Measured directly, a per-feature fallback vector (which
+field-tokenized telemetry always affords) matches or beats subword composition
+at every OOV level, because device attribute codes carry no informative
+character structure. On small vocabularies a smoothed counting baseline
 beats every embedding configuration tested; on realistic open vocabularies at
 1:100 imbalance, plain token embeddings earn their place. Every number below is
 a 5-seed mean ± std from the reproducibility record in `experiments/rerun/`.
@@ -54,7 +57,7 @@ rules that survive are the design in the next section.
 |---|---|---|
 | 1 | Embed the concatenated device string | Structurally broken |
 | 2 | The embedding learns device semantics | Mostly set-overlap geometry |
-| 3 | Subwords add robustness for free | They cost in-vocab accuracy; the OOV benefit is real but priced, and only for morphological drift |
+| 3 | Subwords add robustness for free | They cost in-vocab accuracy and aren't repaid — a per-feature fallback matches or beats them under OOV |
 | 4 | Skip-gram is mandatory | The corpus is causal, the objective is not |
 | 5 | Per-event corpora destroy embeddings | True only for weakly-coupled features |
 | 6 | Gate alerts on known devices | Suppresses exactly the attacks that matter, in any scoring family |
@@ -86,19 +89,24 @@ embeddings, everything else identical) *improves* spoof detection to
 pull same-feature tokens together and blunt the separation the scorer needs.
 Only the no-subword encoder beats the random floor on all seeds (+0.051 ROC,
 +0.111 PR). The OOV robustness subwords are purchased for is now measured
-directly (`oov_regime.py`): novel tokens injected into both benign and attack
-events at 1:100 imbalance, with a same-feature disambiguation on `region` that
-splits two effects the incumbent cannot. Mean-pool dilution alone (one corrupted
-token of seven) beats the likelihood incumbent by +0.19 PR-AUC even on arbitrary
-novel strings; subword recovery adds a further +0.27 PR-AUC when the novel value
-is a morphological variant of a seen one. The incumbent floors both cases
-identically to PR 0.284, unable to tell `region_viken_v577` from `region_x9f3q`.
-This confirms the trade rather than assuming it: subwords cost ~0.02 ROC /
-0.03 PR in-vocabulary and repay it precisely under version-like value drift, not
-under wholly-novel values, where mean-pooling carries the robustness instead.
-The effect is a PR-AUC phenomenon at deployment imbalance and is ~15x smaller on
-ROC. In field-tokenized telemetry the field of an unseen value is always known,
-so an explicit per-feature fallback vector is available regardless.
+directly (`oov_regime.py`) against the encoder this design actually recommends
+(`max_n=0` plus a per-feature fallback vector), not against the likelihood
+incumbent, and it does not favor subwords. Novel tokens are injected into both
+benign and attack events at 1:100 imbalance on the `region` feature, split by
+whether the novelty is morphological. Under **arbitrary** novel codes (the
+realistic case for geo/network attributes, where a new region or ASN shares no
+informative characters with any seen value) the fallback beats subwords by
++0.19 PR-AUC at full drift (CI-robust): FastText composes an arbitrary token
+from meaningless n-gram hashes and scatters the benign class into false
+positives, while the fallback maps every unseen value of a feature to one stable
+vector. Under **morphological** drift (`region_viken` → `region_viken_v577`,
+shared stem) subwords recover the value and close their deficit, but only to a
+tie (+0.085 PR at p=1, 5-seed CI crossing zero); and they start behind
+in-vocabulary (−0.076 PR at p=0). Net: a fallback vector dominates subword
+composition across regimes, because device attribute codes have no morphology
+for n-grams to exploit. `max_n=0` holds in-vocab and under OOV alike; subwords
+would earn their cost only on genuinely morphological fields (version strings,
+structured IDs), and even there they merely tie.
 
 **4 — "Always use skip-gram."** The 2×2 factorial (objective × corpus) shows
 corpus construction is the causal axis of embedding health. Both per-event
@@ -202,7 +210,7 @@ uv run experiments/rerun/ablations/a4_nosub.py --smoke        # subword ablation
 | Claim | Evidence |
 |---|---|
 | Refutations 1–3 (concat, random floor, subwords) | `experiments/rerun/scripts/h2/`, `experiments/rerun/ablations/` (`baseline_controls.py`, `a4_nosub.py`) |
-| Subword OOV trade — dilution vs recovery (refutation 3, measured) | `experiments/rerun/ablations/oov_regime.py`, `SUMMARY.md` (OOV section) |
+| Subword vs fallback under OOV (refutation 3, measured) | `experiments/rerun/ablations/oov_regime.py`, `SUMMARY.md` (OOV section) |
 | Refutation 4 (factorial) and 5 (collapse + scoping) | `experiments/rerun/scripts/h2/h2_rerun.py`, `experiments/rerun/ablations/h6_perevent_collapse.py` |
 | Refutation 6 (gate, cross-family) | `experiments/rerun/scripts/h6/`, `experiments/rerun/ablations/h6_likelihood_incumbent.py` |
 | Refutation 7 (rank-norm) | `experiments/rerun/calib_sweep/` |

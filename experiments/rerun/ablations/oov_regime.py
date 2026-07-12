@@ -40,6 +40,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 import numpy as np
+from gensim.models import FastText
 from sklearn.metrics import average_precision_score, roc_auc_score
 
 ABLATIONS_DIR = Path(__file__).resolve().parent
@@ -66,7 +67,7 @@ ARM_ORDER = ["morphological", "arbitrary", "region_morph", "region_arb"]
 POP_ORDER = {p: i for i, p in enumerate(POPULATIONS)}
 ALPHABET = np.array(list("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"))
 
-BASE_SCORERS = ["mp_raw", "trivial", "two_stage"]
+BASE_SCORERS = ["mp_raw", "mp_nosub", "trivial", "two_stage"]
 LIK_SCORERS = [f"lik_lam{lam}" for lam in LIK.LIK_LAMBDAS]
 ALL_SCORERS = BASE_SCORERS + LIK_SCORERS
 
@@ -131,14 +132,50 @@ def inject_oov(event: dict, arm_name: str, p: float, banned: dict, rng) -> dict:
 
 
 # ---------------------------------------------------------------------------
+# No-subword mean-pool with per-feature fallback — the README's recommended OOV
+# remedy (max_n=0 plain-token embeddings; an unseen value falls back to the mean of
+# that feature's trained token vectors). Contrasts subword composition, which recovers
+# the specific novel value via its stem, against a fallback that collapses every unseen
+# value of a feature to one point.
+# ---------------------------------------------------------------------------
+def train_nosub_model(corpus, seed):
+    # min_n=1, max_n=0 disables the n-gram bucket entirely (A4 convention).
+    return FastText(sentences=corpus, **{**H6.ROBUST_KWARGS, "min_n": 1, "max_n": 0, "seed": seed})
+
+
+def build_nosub_fallback(model) -> dict:
+    """Per-feature fallback = mean of that feature's trained token vectors."""
+    fb = {}
+    for f in H6.FEATURE_ORDER:
+        pref = f + "_"
+        vecs = [model.wv[t] for t in model.wv.key_to_index if t.startswith(pref)]
+        fb[f] = np.mean(vecs, axis=0) if vecs else np.zeros(model.vector_size, dtype=np.float32)
+    return fb
+
+
+def embed_mp_nosub(event, model, fallback) -> np.ndarray:
+    vecs = []
+    for f in H6.FEATURE_ORDER:
+        tok = H6.make_token(f, event.get(f, "unknown"))
+        vecs.append(model.wv[tok] if tok in model.wv.key_to_index else fallback[f])
+    return np.mean(vecs, axis=0)
+
+
+def compute_nosub_centroids(accounts, model, fallback) -> list:
+    return [np.mean([embed_mp_nosub(e, model, fallback) for e in acc["centroid_events"]], axis=0)
+            for acc in accounts]
+
+
+# ---------------------------------------------------------------------------
 # Score collection under injection (both benign and attack events drift)
 # ---------------------------------------------------------------------------
-def collect_population(accounts, centroids, model, population, glob, arm, p, banned, inj_rng):
+def collect_population(accounts, centroids, model, population, glob, arm, p, banned, inj_rng, nosub):
     glob_counts, glob_n, vocab_sizes = glob
+    ns_model, ns_cents, ns_fallback = nosub
     scores = {s: [] for s in ALL_SCORERS}
     labels = []
     n_inject, n_total = 0, 0
-    for acc, centroid in zip(accounts, centroids):
+    for acc, centroid, nsc in zip(accounts, centroids, ns_cents):
         atk_events = acc["novel_atk"] if population == "novel" else acc[population]
         kd = acc["known_devices"]
         acct_counts, n_acct = LIK.account_tables(acc)  # clean tables
@@ -154,6 +191,7 @@ def collect_population(accounts, centroids, model, population, glob, arm, p, ban
             mp = H6.cosine_dist(emb, centroid)
             gated = H6.device_key(e2) in kd
             scores["mp_raw"].append(mp)
+            scores["mp_nosub"].append(H6.cosine_dist(embed_mp_nosub(e2, ns_model, ns_fallback), nsc))
             scores["trivial"].append(0.0 if gated else 1.0)
             scores["two_stage"].append(0.0 if gated else mp)
             for lam in LIK.LIK_LAMBDAS:
@@ -203,9 +241,14 @@ def run(seed: int, smoke: bool, neg_ratio: int) -> dict:
     accounts, _ = H6.generate_accounts(marginals, n_accounts, np.random.default_rng(seed),
                                        n_enroll_neg=n_enroll_neg)
 
-    print(f"[2/3] Training FastText + likelihood tables (seed={seed})...")
-    model = H6.train_model(H6.build_corpus(accounts), seed)
+    print(f"[2/3] Training FastText (subword + no-subword) + likelihood tables (seed={seed})...")
+    corpus = H6.build_corpus(accounts)
+    model = H6.train_model(corpus, seed)
     centroids = H6.compute_centroids(accounts, model)
+    ns_model = train_nosub_model(corpus, seed)
+    ns_fallback = build_nosub_fallback(ns_model)
+    ns_cents = compute_nosub_centroids(accounts, ns_model, ns_fallback)
+    nosub = (ns_model, ns_cents, ns_fallback)
     glob = LIK.build_global_tables(accounts)
     banned = build_banned(accounts)
     banned_sizes = {f: len(banned[f]) for f in H6.FEATURE_ORDER}
@@ -214,7 +257,7 @@ def run(seed: int, smoke: bool, neg_ratio: int) -> dict:
     # from A2b, giving the incumbent its best foot forward before OOV pressure.
     clean_rng = np.random.default_rng([seed, 999, 0])
     clean_sk1, _ = collect_population(accounts, centroids, model, "spoof_k1", glob,
-                                      ARM_ORDER[0], 0.0, banned, clean_rng)
+                                      ARM_ORDER[0], 0.0, banned, clean_rng, nosub)
     clean_metrics = cell_metrics(clean_sk1, seed)
     best_lam = max(LIK.LIK_LAMBDAS,
                    key=lambda lam: clean_metrics[f"lik_lam{lam}"]["roc_auc"])
@@ -233,7 +276,7 @@ def run(seed: int, smoke: bool, neg_ratio: int) -> dict:
                 inj_rng = np.random.default_rng([seed, arm_id, int(round(p * 100)),
                                                  POP_ORDER[pop]])
                 collected, rate = collect_population(accounts, centroids, model, pop,
-                                                     glob, arm, p, banned, inj_rng)
+                                                     glob, arm, p, banned, inj_rng, nosub)
                 pop_metrics[pop] = cell_metrics(collected, seed)
                 obs_rate[pop] = rate
                 if pop == "spoof_k1":
@@ -242,17 +285,21 @@ def run(seed: int, smoke: bool, neg_ratio: int) -> dict:
             delta_rng = np.random.default_rng([seed, arm_id, int(round(p * 100)), 99])
             delta = LIK.paired_delta(sk1_scores["mp_raw"][0], sk1_scores[best_name][0],
                                      sk1_scores["mp_raw"][1], n_delta_boot, delta_rng)
+            # Subword vs the README's fallback strategy — the claim under test.
+            delta_ns_rng = np.random.default_rng([seed, arm_id, int(round(p * 100)), 98])
+            delta_ns = LIK.paired_delta(sk1_scores["mp_raw"][0], sk1_scores["mp_nosub"][0],
+                                        sk1_scores["mp_raw"][1], n_delta_boot, delta_ns_rng)
             results[arm][key] = {
                 "obs_oov_rate": obs_rate,
                 "metrics": pop_metrics,
                 "delta_mp_minus_likbest_spoof_k1": delta,
+                "delta_mp_minus_nosub_spoof_k1": delta_ns,
             }
-            mp = pop_metrics["spoof_k1"]["mp_raw"]["roc_auc"]
-            lik = pop_metrics["spoof_k1"][best_name]["roc_auc"]
-            triv = pop_metrics["spoof_k1"]["trivial"]["roc_auc"]
-            print(f"  {arm:<14} p={p:<4} spoof_k1 ROC  mp={mp:.3f}  {best_name}={lik:.3f}  "
-                  f"trivial={triv:.3f}  dROC={delta['roc'][0]:+.3f}"
-                  f"[{delta['roc'][1]:+.3f},{delta['roc'][2]:+.3f}]  obs_oov={obs_rate['spoof_k1']:.2f}")
+            m = pop_metrics["spoof_k1"]
+            print(f"  {arm:<14} p={p:<4} spoof_k1 PR  mp={m['mp_raw']['pr_auc']:.3f}  "
+                  f"nosub={m['mp_nosub']['pr_auc']:.3f}  {best_name}={m[best_name]['pr_auc']:.3f}  "
+                  f"dPR(mp-nosub)={delta_ns['pr'][0]:+.3f}"
+                  f"[{delta_ns['pr'][1]:+.3f},{delta_ns['pr'][2]:+.3f}]  obs={obs_rate['spoof_k1']:.2f}")
 
     return {
         "schema_version": 1,

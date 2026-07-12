@@ -190,11 +190,37 @@ morphology with which feature carries signal.
 Reading: **this complicates A4.** A4 found subwords a net negative for *in-vocabulary*
 discrimination (max_n=0 improves spoof ROC). The OOV test shows the other side of the
 same trade: subwords are net-*positive* under *morphological* OOV drift, recovering
-signal the categorical incumbent floors identically. The subword machinery is a
-regime-dependent trade — a liability on stable closed vocabularies, an asset when novel
-values are variants of known ones (version strings, structured IDs, typos). A4's
-plain-token recommendation holds for the studied in-vocab regime, but a deployment
-expecting version/ID drift should weigh the OOV benefit A4's scope excluded.
+signal the categorical incumbent floors identically. The subword machinery *looks*
+like a regime-dependent trade against the incumbent — a liability on stable
+vocabularies, an asset when novel values are variants of known ones. But that
+comparison uses the wrong baseline: measured against the design's recommended
+`max_n=0` + per-feature fallback encoder (next subsection), the subword benefit does
+not survive.
+
+### Subword composition vs the recommended fallback encoder
+
+The +0.27 dPR "subword recovery" above is measured against the *incumbent*, which
+floors OOV. The design does not recommend the incumbent — it recommends `max_n=0`
+plus a per-feature fallback vector (`mp_nosub`: unseen value → mean of that feature's
+trained token vectors). Measured against *that* baseline, subwords do not win:
+
+| region arm (spoof_k1 PR) | subword (mp_raw) | fallback (mp_nosub) | dPR (mp−nosub) @ p=1 |
+|---|---|---|---|
+| in-vocab (p=0, both arms) | 0.837 | **0.914** | −0.076 (fallback; the A4 effect) |
+| region_arb (arbitrary) | 0.473 | **0.662** | −0.189 (fallback, CI-robust) |
+| region_morph (morphological) | **0.746** | 0.662 | +0.085 (tie, 5-seed CI crosses 0) |
+
+The fallback is blind to surface form — every unseen value of a feature maps to the
+feature mean, so it scores identically (0.662) on both region arms at p=1. Subwords
+see surface form: they recover morphological variants (0.746) but fabricate misleading
+vectors for arbitrary codes (0.473) that scatter the benign class into false positives
+under 1:100 imbalance. Because device attribute codes carry no informative character
+structure, the fallback matches or beats subwords at every level; subwords only tie
+under heavy morphological drift. This **strengthens** the plain-token (`max_n=0`)
+recommendation — it now holds under OOV, not just in-vocab, closing the trade-off A4
+left open. FastText's subword OOV advantage requires morphologically-structured fields
+(version strings, structured IDs); geo/network categorical codes are not that, and the
+fallback is the better OOV mechanism there.
 
 **Scope — benign-only arm not pursued (by design).** A benign-only (asymmetric) OOV
 arm has no realistic generating process: vocabulary drift is a property of time and
